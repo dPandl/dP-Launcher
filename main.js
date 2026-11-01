@@ -32,7 +32,7 @@ const defaultSettings = {
   javaPath: '',
   username: 'Spieler',
   themeSeason: 'auto', // 'auto' | 'spring' | 'summer' | 'autumn' | 'winter'
-  manifestUrl: 'https://raw.githubusercontent.com/dPandl/electron-minecraft-launcher/main/server-manifest.json',
+  manifestUrl: '',
   serverIp: 'dein-server.bisecthosting.me:25565',
   autoSyncOnStart: true
 };
@@ -238,20 +238,34 @@ ipcMain.handle('save-settings', (event, newSettings) => {
 });
 
 ipcMain.handle('fetch-remote-manifest', async (event, url) => {
-  return new Promise((resolve, reject) => {
-    const mod = url.startsWith('https') ? https : http;
-    mod.get(url, { headers: { 'User-Agent': 'MinecraftLauncher/1.0' } }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          resolve(JSON.parse(data));
-        } catch (e) {
-          reject(new Error('Ungültiges JSON im Manifest'));
+  if (!url || typeof url !== 'string' || !url.trim().startsWith('http')) {
+    return null;
+  }
+  return new Promise((resolve) => {
+    const request = (targetUrl) => {
+      const mod = targetUrl.startsWith('https') ? https : http;
+      mod.get(targetUrl, { headers: { 'User-Agent': 'MinecraftLauncher/1.0' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          request(res.headers.location);
+          return;
         }
-      });
-      res.on('error', reject);
-    }).on('error', reject);
+        if (res.statusCode !== 200) {
+          resolve(null);
+          return;
+        }
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            resolve(null);
+          }
+        });
+        res.on('error', () => resolve(null));
+      }).on('error', () => resolve(null));
+    };
+    request(url.trim());
   });
 });
 
