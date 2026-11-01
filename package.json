@@ -1,0 +1,76 @@
+{
+  "name": "electron-minecraft-launcher",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Moderner saisonaler Minecraft Server Launcher mit Modrinth-Integration",
+  "author": "Pascal",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:electron": "vite build --mode electron",
+    "preview": "vite preview",
+    "start": "electron .",
+    "electron:dev": "concurrently \"vite --mode electron\" \"wait-on http://localhost:5173 && electron .\"",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist -b gh-pages",
+    "dist": "npm run build:electron && electron-builder --win",
+    "dist:win": "npm run build:electron && electron-builder --win",
+    "dist:linux": "npm run build:electron && electron-builder --linux",
+    "publish-app": "node scripts/publish.js"
+  },
+  "build": {
+    "appId": "com.minecraftlauncher.app",
+    "productName": "Minecraft Launcher",
+    "copyright": "Copyright © 2026 Pascal",
+    "asar": true,
+    "compression": "normal",
+    "artifactName": "${productName}-${version}-${os}.${ext}",
+    "publish": {
+      "provider": "github",
+      "owner": "dPandl",
+      "repo": "electron-minecraft-launcher",
+      "releaseType": "release"
+    },
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "public/**/*",
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "win": {
+      "icon": "public/app-icon.png",
+      "target": [
+        "zip"
+      ]
+    },
+    "linux": {
+      "icon": "public/app-icon.png",
+      "target": [
+        "zip"
+      ],
+      "category": "Game"
+    }
+  },
+  "dependencies": {
+    "lucide-react": "^1.18.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^10.0.3",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.3",
+    "gh-pages": "^6.3.0",
+    "vite": "^8.0.12",
+    "wait-on": "^9.0.10"
+  }
+}

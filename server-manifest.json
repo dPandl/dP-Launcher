@@ -1,0 +1,40 @@
+{
+  "serverName": "Bisect Community Server",
+  "serverAddress": "dein-server.bisecthosting.me:25565",
+  "gameVersion": "1.21.1",
+  "loader": "fabric",
+  "loaderVersion": "0.16.9",
+  "cleanOldMods": true,
+  "requiredMods": [
+    {
+      "slug": "fabric-api",
+      "name": "Fabric API",
+      "description": "Zentraler Bibliotheks-Mod für Fabric Mods"
+    },
+    {
+      "slug": "sodium",
+      "name": "Sodium",
+      "description": "Moderne Grafik-Rendering-Engine für maximale FPS"
+    },
+    {
+      "slug": "lithium",
+      "name": "Lithium",
+      "description": "Optimiert Spielphysik, Chunk-Laden und KI"
+    },
+    {
+      "slug": "iris",
+      "name": "Iris Shaders",
+      "description": "Hochperformante Shader-Unterstützung mit Sodium"
+    },
+    {
+      "slug": "simple-voice-chat",
+      "name": "Simple Voice Chat",
+      "description": "Nähe-Sprachchat direkt im Spiel"
+    },
+    {
+      "slug": "modmenu",
+      "name": "Mod Menu",
+      "description": "Menü zur Anzeige und Konfiguration aller installierten Mods"
+    }
+  ]
+}
