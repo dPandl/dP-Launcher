@@ -5,3 +5,10 @@ dist-electron
 .env.local
 .DS_Store
 *.log
+
+# Lokale Sicherungen, nicht ins Repository
+.local-backup/
+
+# Lokale Claude-Konfiguration und Test-Sync, nicht ins Repository
+.claude/
+TESTIT_SYNC.md

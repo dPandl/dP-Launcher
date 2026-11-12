@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowDownCircle, RefreshCw, X } from 'lucide-react';
+import { appAlert } from '../utils/appDialog';
 
 export default function UpdateModal({ updateInfo, onClose }) {
   const [downloading, setDownloading] = useState(false);
@@ -19,50 +21,58 @@ export default function UpdateModal({ updateInfo, onClose }) {
 
   const handleInstall = async () => {
     if (!updateInfo.downloadUrl) {
-      alert('Keine Download-Datei für dein Betriebssystem gefunden.');
+      appAlert('Keine Download-Datei für dein Betriebssystem gefunden.', { warning: true });
       return;
     }
     setDownloading(true);
     if (window.electronAPI) {
       const res = await window.electronAPI.downloadAndInstallUpdate(updateInfo.downloadUrl);
       if (!res.success) {
-        alert(`Update fehlgeschlagen: ${res.error}`);
+        appAlert(`Update fehlgeschlagen: ${res.error}`, { warning: true });
         setDownloading(false);
       }
     }
   };
 
-  return (
-    <div className="modal-overlay">
+  return createPortal(
+    <div className="modal-overlay" onClick={(e) => { if (!downloading && e.target === e.currentTarget) onClose(); }}>
       <div className="modal-content">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <ArrowDownCircle size={22} style={{ color: 'var(--color-accent)' }} />
-            <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>Neues Launcher-Update</h2>
+            <div style={{ width: '36px', height: '36px', borderRadius: '12px', background: 'var(--color-primary-soft)', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <ArrowDownCircle size={20} />
+            </div>
+            <h2 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-main)' }}>Neues Launcher-Update</h2>
           </div>
           {!downloading && (
-            <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-              <X size={18} />
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ width: '32px', height: '32px', borderRadius: '999px', background: 'var(--bg-well)', border: '1px solid var(--border-card)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            >
+              <X size={16} />
             </button>
           )}
         </div>
 
-        <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-          Eine neue Version (<strong style={{ color: '#fff' }}>v{updateInfo.latestVersion}</strong>) des Minecraft Launchers ist verfügbar!
+        <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', marginBottom: '16px', lineHeight: 1.5 }}>
+          Eine neue Version (<strong style={{ color: 'var(--text-main)' }}>v{updateInfo.latestVersion}</strong>) des dP Launchers ist verfügbar!
         </p>
 
         {updateInfo.releaseNotes && (
           <div
             style={{
-              padding: '12px',
-              background: 'rgba(0, 0, 0, 0.3)',
-              borderRadius: '8px',
-              fontSize: '12px',
-              color: 'var(--text-muted)',
-              maxHeight: '140px',
+              padding: '14px 16px',
+              background: 'var(--bg-well)',
+              border: '1px solid var(--border-card)',
+              borderRadius: '16px',
+              fontSize: '12.5px',
+              color: 'var(--text-main)',
+              maxHeight: '150px',
               overflowY: 'auto',
-              marginBottom: '16px',
-              whiteSpace: 'pre-line'
+              marginBottom: '18px',
+              whiteSpace: 'pre-line',
+              lineHeight: 1.5
             }}
           >
             {updateInfo.releaseNotes}
@@ -71,14 +81,14 @@ export default function UpdateModal({ updateInfo, onClose }) {
 
         {downloading ? (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px', color: 'var(--text-muted)', marginBottom: '8px' }}>
               <span>Lade Launcher-Update herunter...</span>
-              <span>{progress}%</span>
+              <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>{progress}%</span>
             </div>
             <div className="progress-bar-container">
               <div className="progress-bar-fill" style={{ width: `${progress}%` }} />
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '6px' }}>
+            <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '6px' }}>
               Die App startet nach dem Download automatisch neu.
             </div>
           </div>
@@ -93,6 +103,7 @@ export default function UpdateModal({ updateInfo, onClose }) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

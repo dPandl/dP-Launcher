@@ -1,4 +1,4 @@
-# 🌲 Minecraft Server Launcher (Saisonal & Modrinth-Powered)
+# dP Launcher
 
 Ein moderner, performanter und eleganter Minecraft Server Launcher mit saisonalem Design, automatischem Mod-Sync über Modrinth und GitHub Pages Auto-Updates.
 
@@ -19,6 +19,11 @@ Ein moderner, performanter und eleganter Minecraft Server Launcher mit saisonale
   * 1-Klick-Installation in den richtigen Ordner.
 * **Auto-Update System (GitHub Releases & Pages):**
   * Erkennt neue Versionen auf GitHub und ermöglicht 1-Klick-In-App-Updates (wie in Griddly CSV).
+* **Instanzen & Server:**
+  * Mehrere Instanzen mit eigener Minecraft-Version, Modloader und RAM-Einstellung.
+  * Mehrere Server, Import über `.dpmcserver`-Dateien.
+* **Skin Studio & Profil:** Skins verwalten, 3D-Vorschau, Microsoft-Login.
+* **Server-Admin:** Modpack, Changelog und Guides pflegen und veröffentlichen.
 * **Mod-Manager:**
   * Lokale Mods anzeigen, mit einem Klick deaktivieren (`.disabled`) oder löschen.
   * Direkter Absprung in den Datei-Explorer.
@@ -50,22 +55,13 @@ npm run publish-app
 
 ---
 
-## 📋 Server-Manifest anpassen (`server-manifest.json`)
+## 📋 Modliste verwalten (Server-Manifest)
 
-Du musst Mods nicht selbst hochladen! Trage einfach den Modrinth-Slug ein:
+Das Manifest liegt im GitHub-Repo des jeweiligen Servers. Die Modliste wird im Launcher unter **Server-Admin → Modpack** gepflegt, nicht von Hand. Der Tab erscheint nur für Microsoft-Konten, deren UUID im Manifest unter `admins` steht.
 
-```json
-{
-  "serverName": "Bisect Community Server",
-  "serverAddress": "dein-server.bisecthosting.me:25565",
-  "gameVersion": "1.21.1",
-  "loader": "fabric",
-  "cleanOldMods": true,
-  "requiredMods": [
-    { "slug": "fabric-api", "name": "Fabric API" },
-    { "slug": "sodium", "name": "Sodium" },
-    { "slug": "simple-voice-chat", "name": "Simple Voice Chat" }
-  ]
-}
-```
-Der Launcher fragt die Modrinth-API ab und lädt automatisch die jeweils neueste, kompatible Version herunter!
+1. **Entwurf bearbeiten:** Mods über die Modrinth-Suche hinzufügen. Version, Dateiname und `sha1` werden festgeschrieben, Pflicht-Abhängigkeiten kommen automatisch dazu.
+2. **Lokal testen:** Startet den Entwurf in einer eigenen Instanz (`instances/modpack-test`). Die normale Installation, Spieler und Server bleiben unverändert.
+3. **Auf Server anwenden:** Gleicht den `/mods`-Ordner des BisectHosting-Servers mit dem Entwurf ab. Von Hand abgelegte Mods bleiben erhalten.
+4. **Veröffentlichen:** Committet das Manifest per GitHub-API und erhöht `modpackVersion`. Die Launcher der Spieler erkennen die neue Version und synchronisieren vor dem nächsten Spielstart.
+
+Das Modpack-Update ist vom App-Update (`npm run publish-app`) unabhängig. BisectHosting-Key und GitHub-Token liegen nur in den lokalen `launcher-settings.json`.

@@ -4,34 +4,80 @@
 const MODRINTH_API_BASE = 'https://api.modrinth.com/v2';
 const USER_AGENT = 'Electron-Minecraft-Launcher/1.0.0 (contact@github.com)';
 
+const SUPPORTED_SIDES = ['required', 'optional'];
+
+async function fetchJson(path, errorMessage) {
+  const response = await fetch(`${MODRINTH_API_BASE}${path}`, {
+    headers: { 'User-Agent': USER_AGENT }
+  });
+  if (!response.ok) throw new Error(`${errorMessage}: HTTP ${response.status}`);
+  return await response.json();
+}
+
+// Client/Server-Filter wie auf modrinth.com: Nur eine Seite gewählt heißt "läuft nur dort"
+function buildEnvironmentFacets(environments) {
+  const client = environments.includes('client');
+  const server = environments.includes('server');
+  if (client === server && !client) return [];
+
+  const facets = [];
+  if (client) facets.push(SUPPORTED_SIDES.map(side => `client_side:${side}`));
+  if (server) facets.push(SUPPORTED_SIDES.map(side => `server_side:${side}`));
+  if (client && !server) facets.push(['server_side:unsupported']);
+  if (server && !client) facets.push(['client_side:unsupported']);
+  return facets;
+}
+
+let tagsPromise = null;
+
 export const ModrinthService = {
   /**
-   * Durchsucht Modrinth nach Mods, Resourcepacks oder Shadern
+   * Durchsucht Modrinth nach Projekten aller Typen
    * @param {Object} options
    * @param {string} options.query - Suchbegriff
-   * @param {string} options.projectType - 'mod' | 'resourcepack' | 'shader'
-   * @param {string} options.gameVersion - z.B. '1.21.1'
-   * @param {string} options.loader - 'fabric' | 'neoforge' | 'forge' | 'quilt'
+   * @param {string} options.projectType - 'mod' | 'resourcepack' | 'datapack' | 'shader' | 'modpack' | 'plugin' | 'minecraft_java_server'
+   * @param {string[]} options.gameVersions - z.B. ['26.3'], mehrere gelten als "eine davon"
+   * @param {string[]} options.loaders - z.B. ['fabric'], mehrere gelten als "einer davon"
+   * @param {string[]} options.categories - Jede gewählte Kategorie muss zutreffen
+   * @param {string[]} options.environments - 'client' und/oder 'server'
+   * @param {boolean} options.openSource - Nur Open-Source-Projekte
+   * @param {string} options.sort - 'relevance' | 'downloads' | 'follows' | 'newest' | 'updated'
    * @param {number} options.limit - Anzahl Ergebnisse (default 20)
    * @param {number} options.offset - Pagination Offset
    */
-  async searchProjects({ query = '', projectType = 'mod', gameVersion = '', loader = '', limit = 20, offset = 0 } = {}) {
+  async searchProjects({
+    query = '',
+    projectType = 'mod',
+    gameVersions = [],
+    loaders = [],
+    categories = [],
+    environments = [],
+    openSource = false,
+    sort = 'relevance',
+    limit = 20,
+    offset = 0
+  } = {}) {
     const facets = [];
     if (projectType) {
       facets.push([`project_type:${projectType}`]);
     }
-    if (gameVersion) {
-      facets.push([`versions:${gameVersion}`]);
+    if (gameVersions.length > 0) {
+      facets.push(gameVersions.map(version => `versions:${version}`));
     }
-    if (loader && projectType === 'mod') {
-      facets.push([`categories:${loader.toLowerCase()}`]);
+    if (loaders.length > 0) {
+      facets.push(loaders.map(loader => `categories:${loader.toLowerCase()}`));
+    }
+    categories.forEach(category => facets.push([`categories:${category}`]));
+    facets.push(...buildEnvironmentFacets(environments));
+    if (openSource) {
+      facets.push(['open_source:true']);
     }
 
     const params = new URLSearchParams({
       query,
       limit: limit.toString(),
       offset: offset.toString(),
-      index: 'relevance'
+      index: sort
     });
 
     if (facets.length > 0) {
@@ -47,6 +93,49 @@ export const ModrinthService = {
     }
 
     return await response.json();
+  },
+
+  /**
+   * Lädt Kategorien, Loader und Spielversionen für die Filter (einmal pro Sitzung)
+   */
+  getTags() {
+    if (!tagsPromise) {
+      tagsPromise = Promise.all([
+        fetchJson('/tag/category', 'Kategorien konnten nicht geladen werden'),
+        fetchJson('/tag/loader', 'Loader konnten nicht geladen werden'),
+        fetchJson('/tag/game_version', 'Spielversionen konnten nicht geladen werden')
+      ])
+        .then(([categories, loaders, gameVersions]) => ({ categories, loaders, gameVersions }))
+        .catch(err => {
+          tagsPromise = null;
+          throw err;
+        });
+    }
+    return tagsPromise;
+  },
+
+  getProjectMembers(slugOrId) {
+    return fetchJson(`/project/${slugOrId}/members`, 'Ersteller konnten nicht geladen werden');
+  },
+
+  getProjectDependencies(slugOrId) {
+    return fetchJson(`/project/${slugOrId}/dependencies`, 'Abhängigkeiten konnten nicht geladen werden');
+  },
+
+  /**
+   * Lädt Details zu mehreren Projekten in einem einzigen Request
+   */
+  async getProjects(ids = []) {
+    if (!ids || ids.length === 0) return [];
+    try {
+      const response = await fetch(`${MODRINTH_API_BASE}/projects?ids=${encodeURIComponent(JSON.stringify(ids))}`, {
+        headers: { 'User-Agent': USER_AGENT }
+      });
+      if (!response.ok) return [];
+      return await response.json();
+    } catch {
+      return [];
+    }
   },
 
   /**
@@ -94,6 +183,12 @@ export const ModrinthService = {
     const resolvedMods = [];
 
     for (const modConfig of requiredModsList) {
+      // Festgeschriebene Mods werden unverändert übernommen
+      if (modConfig.versionId && modConfig.sha1 && modConfig.downloadUrl && modConfig.filename) {
+        resolvedMods.push(modConfig);
+        continue;
+      }
+
       try {
         let versionData = null;
 
@@ -115,10 +210,10 @@ export const ModrinthService = {
           }
 
           if (modConfig.versionNumber) {
-            versionData = versions.find(v => v.version_number === modConfig.versionNumber) || versions[0];
+            versionData = versions.find(v => v.version_number === modConfig.versionNumber) || versions.find(v => v.version_type === 'release') || versions[0];
           } else {
-            // Neueste Version nehmen
-            versionData = versions[0];
+            // Bevorzuge immer stabile Releases vor unfertigen Beta/Alpha-Versionen
+            versionData = versions.find(v => v.version_type === 'release') || versions[0];
           }
         }
 
@@ -127,6 +222,7 @@ export const ModrinthService = {
         if (!primaryFile) continue;
 
         resolvedMods.push({
+          projectId: versionData.project_id,
           slug: modConfig.slug,
           name: modConfig.name || versionData.name || modConfig.slug,
           versionId: versionData.id,

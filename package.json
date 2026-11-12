@@ -7,7 +7,8 @@
   "type": "module",
   "main": "main.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.js",
+    "dev:vite": "vite",
     "build": "vite build",
     "build:electron": "vite build --mode electron",
     "preview": "vite preview",
@@ -22,7 +23,7 @@
   },
   "build": {
     "appId": "com.minecraftlauncher.app",
-    "productName": "Minecraft Launcher",
+    "productName": "dP Launcher",
     "copyright": "Copyright © 2026 Pascal",
     "asar": true,
     "compression": "normal",
@@ -30,7 +31,7 @@
     "publish": {
       "provider": "github",
       "owner": "dPandl",
-      "repo": "electron-minecraft-launcher",
+      "repo": "dP-Launcher",
       "releaseType": "release"
     },
     "directories": {
@@ -40,27 +41,65 @@
       "dist/**/*",
       "public/**/*",
       "main.js",
+      "modpackUtils.js",
+      "modResolver.js",
+      "clientDefaults.js",
+      "serverStore.js",
+      "instanceStore.js",
       "preload.js",
       "package.json"
     ],
+    "fileAssociations": [
+      {
+        "ext": "dpmcserver",
+        "name": "dP Launcher Server",
+        "description": "Server für den dP Launcher",
+        "role": "Viewer"
+      }
+    ],
     "win": {
-      "icon": "public/app-icon.png",
+      "icon": "public/app-icon.ico",
       "target": [
-        "zip"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "linux": {
       "icon": "public/app-icon.png",
       "target": [
+        "AppImage",
         "zip"
       ],
       "category": "Game"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "dP Launcher"
     }
   },
   "dependencies": {
+    "dompurify": "^3.4.17",
+    "fflate": "^0.8.3",
     "lucide-react": "^1.18.0",
+    "marked": "^18.1.2",
+    "minecraft-launcher-core": "^3.18.2",
+    "msmc": "^5.0.5",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "skinview3d": "^3.4.2"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",

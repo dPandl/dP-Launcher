@@ -1,6 +1,16 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Account & Authentication
+  loginMicrosoft: () => ipcRenderer.invoke('login-microsoft'),
+  loginOffline: (username) => ipcRenderer.invoke('login-offline', username),
+  logoutAccount: () => ipcRenderer.invoke('logout-account'),
+  getAccount: () => ipcRenderer.invoke('get-account'),
+  changeSkin: (options) => ipcRenderer.invoke('change-minecraft-skin', options),
+  selectSkinFile: () => ipcRenderer.invoke('select-skin-file'),
+  getSkinHistory: () => ipcRenderer.invoke('get-skin-history'),
+  deleteSkinHistoryItem: (id) => ipcRenderer.invoke('delete-skin-history-item', id),
+
   // Window Controls
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
@@ -12,6 +22,47 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openGameDir: (subDir) => ipcRenderer.invoke('open-game-dir', subDir),
   getInstalledItems: (category) => ipcRenderer.invoke('get-installed-items', category),
   deleteItem: (category, filename) => ipcRenderer.invoke('delete-item', { category, filename }),
+  // Eigene Instanzen
+  listInstances: () => ipcRenderer.invoke('instances-list'),
+  createInstance: (input) => ipcRenderer.invoke('instances-create', input),
+  updateInstance: (id, data) => ipcRenderer.invoke('instances-update', { id, data }),
+  removeInstance: (id, deleteFiles) => ipcRenderer.invoke('instances-remove', { id, deleteFiles }),
+  openInstanceFolder: (id) => ipcRenderer.invoke('instances-open-folder', id),
+  launchInstance: (id) => ipcRenderer.invoke('instances-launch', id),
+  setModsTarget: (target) => ipcRenderer.invoke('mods-target-set', target),
+  getMinecraftVersions: () => ipcRenderer.invoke('minecraft-versions'),
+  installMrpack: (options) => ipcRenderer.invoke('modpack-install-mrpack', options),
+  onInstanceInstallProgress: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('instance-install-progress', subscription);
+    return () => ipcRenderer.removeListener('instance-install-progress', subscription);
+  },
+  onInstancesChanged: (callback) => {
+    const subscription = () => callback();
+    ipcRenderer.on('instances-changed', subscription);
+    return () => ipcRenderer.removeListener('instances-changed', subscription);
+  },
+  // Server-Verwaltung
+  listServers: () => ipcRenderer.invoke('servers-list'),
+  addServer: (input) => ipcRenderer.invoke('servers-add', input),
+  updateServer: (id, data) => ipcRenderer.invoke('servers-update', { id, data }),
+  setActiveServer: (id) => ipcRenderer.invoke('servers-set-active', id),
+  removeServer: (id, deleteFiles) => ipcRenderer.invoke('servers-remove', { id, deleteFiles }),
+  openServerFolder: (id) => ipcRenderer.invoke('servers-open-folder', id),
+  exportServer: (id, name) => ipcRenderer.invoke('servers-export', { id, name }),
+  pickServerFile: () => ipcRenderer.invoke('servers-import-pick'),
+  takePendingServerFile: () => ipcRenderer.invoke('servers-take-pending-file'),
+  onServersChanged: (callback) => {
+    const subscription = () => callback();
+    ipcRenderer.on('servers-changed', subscription);
+    return () => ipcRenderer.removeListener('servers-changed', subscription);
+  },
+  onServerFileOpened: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('server-file-opened', subscription);
+    return () => ipcRenderer.removeListener('server-file-opened', subscription);
+  },
+  resolveInstalledProject: (category, filename) => ipcRenderer.invoke('resolve-installed-project', { category, filename }),
   toggleMod: (filename) => ipcRenderer.invoke('toggle-mod', filename),
 
   // Modrinth & Sync Engine
@@ -26,6 +77,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Game Launch & Logs
   detectJava: () => ipcRenderer.invoke('detect-java'),
   launchGame: (options) => ipcRenderer.invoke('launch-game', options),
+  killGame: () => ipcRenderer.invoke('kill-game'),
+  getGameStatus: () => ipcRenderer.invoke('get-game-status'),
+  onGameStatus: (callback) => {
+    const subscription = (event, status) => callback(status);
+    ipcRenderer.on('game-status', subscription);
+    return () => ipcRenderer.removeListener('game-status', subscription);
+  },
   onGameLog: (callback) => {
     const subscription = (event, log) => callback(log);
     ipcRenderer.on('game-log', subscription);
@@ -35,7 +93,42 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Settings & Manifest
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
-  fetchRemoteManifest: (url) => ipcRenderer.invoke('fetch-remote-manifest', url),
+
+  // Eigene Mods der Spieler, passend zur Modliste des Servers
+  getUserMods: () => ipcRenderer.invoke('user-mods-list'),
+  installUserMod: (options) => ipcRenderer.invoke('user-mods-install', options),
+  removeUserMod: (projectId) => ipcRenderer.invoke('user-mods-remove', projectId),
+
+  // Modpack-Workflow (Entwurf, Server, Veröffentlichung)
+  getModpackDraft: () => ipcRenderer.invoke('modpack-get-draft'),
+  saveModpackDraft: (draft) => ipcRenderer.invoke('modpack-save-draft', draft),
+  fetchPublishedModpack: () => ipcRenderer.invoke('modpack-fetch-published'),
+  updateServerChangelog: (options) => ipcRenderer.invoke('modpack-update-changelog', options),
+  publishModpack: (options) => ipcRenderer.invoke('modpack-publish', options),
+  getAvailableModpackConfigs: () => ipcRenderer.invoke('modpack-get-available-configs'),
+  applyModpackToServer: (options) => ipcRenderer.invoke('modpack-apply-server', options),
+  getServerBackupInfo: () => ipcRenderer.invoke('modpack-get-server-backup-info'),
+  restoreServerBackup: () => ipcRenderer.invoke('modpack-restore-server-backup'),
+  launchModpackTest: () => ipcRenderer.invoke('modpack-launch-test'),
+  onModpackServerLog: (callback) => {
+    const subscription = (event, line) => callback(line);
+    ipcRenderer.on('modpack-server-log', subscription);
+    return () => ipcRenderer.removeListener('modpack-server-log', subscription);
+  },
+  onModpackDraftUpdated: (callback) => {
+    const subscription = (event, draft) => callback(draft);
+    ipcRenderer.on('modpack-draft-updated', subscription);
+    return () => ipcRenderer.removeListener('modpack-draft-updated', subscription);
+  },
+  getGithubConfig: () => ipcRenderer.invoke('github-get-config'),
+  saveGithubConfig: (config) => ipcRenderer.invoke('github-save-config', config),
+  testGithubConnection: () => ipcRenderer.invoke('github-test-connection'),
+
+  // Handbuch & Mod-Guides
+  getGuides: () => ipcRenderer.invoke('guides-get'),
+  saveGuides: (guides) => ipcRenderer.invoke('guides-save', guides),
+  uploadGuideImage: () => ipcRenderer.invoke('guides-upload-image'),
+  publishGuides: () => ipcRenderer.invoke('guides-publish'),
 
   // Auto-Update (GitHub Pages & Releases)
   checkForUpdate: (currentVersion) => ipcRenderer.invoke('check-for-update', currentVersion),
@@ -45,6 +138,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-progress', subscription);
     return () => ipcRenderer.removeListener('update-progress', subscription);
   },
+
+  // BisectHosting & Server Admin
+  bisectApi: (options) => ipcRenderer.invoke('bisect-api', options),
+  bisectUploadMod: (options) => ipcRenderer.invoke('bisect-upload-mod', options),
+  bisectInstallModrinthMod: (options) => ipcRenderer.invoke('bisect-install-modrinth-mod', options),
+  bisectEnableKokotoWebChat: (options) => ipcRenderer.invoke('bisect-enable-kokoto-webchat', options),
+  bisectGetAllocations: (options) => ipcRenderer.invoke('bisect-get-allocations', options),
+  selectModFile: () => ipcRenderer.invoke('select-mod-file'),
+  checkServerStatus: (address) => ipcRenderer.invoke('check-server-status', address),
+
+  // Live Server-Konsole & Remote Command Control
+  serverConsoleConnect: (options) => ipcRenderer.invoke('server-console-connect', options),
+  serverConsoleDisconnect: () => ipcRenderer.invoke('server-console-disconnect'),
+  serverConsoleSend: (options) => ipcRenderer.invoke('server-console-send', options),
+  onServerConsoleLine: (callback) => {
+    const subscription = (event, line) => callback(line);
+    ipcRenderer.on('server-console-line', subscription);
+    return () => ipcRenderer.removeListener('server-console-line', subscription);
+  },
+  onServerConsoleStatus: (callback) => {
+    const subscription = (event, status) => callback(status);
+    ipcRenderer.on('server-console-status', subscription);
+    return () => ipcRenderer.removeListener('server-console-status', subscription);
+  },
+
+  // Local Config Editor
+  getLocalConfigFiles: () => ipcRenderer.invoke('local-config-list'),
+  readLocalConfigFile: (filePath) => ipcRenderer.invoke('local-config-read', filePath),
+  saveLocalConfigFile: (filePath, content) => ipcRenderer.invoke('local-config-write', { path: filePath, content }),
 
   // Utilities
   openExternal: (url) => ipcRenderer.invoke('open-external', url),

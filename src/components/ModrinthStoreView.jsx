@@ -1,229 +1,232 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Download, Check, Sparkles, Filter, Package, Image, Palette } from 'lucide-react';
+import { Download, Check, ExternalLink, RefreshCw, Trash2, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { ModrinthService } from '../services/modrinthService';
+import ModrinthBrowser from './modrinth/ModrinthBrowser';
+import { getProjectUrl, openExternal } from './modrinth/modrinthUi';
+import { getManifestMods } from '../../modpackUtils.js';
 
-export default function ModrinthStoreView({ manifest }) {
-  const [activeType, setActiveType] = useState('mod'); // 'mod' | 'shader' | 'resourcepack'
-  const [searchQuery, setSearchQuery] = useState('');
-  const [projects, setProjects] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [installingId, setInstallingId] = useState(null);
-  const [installedMap, setInstalledMap] = useState({});
+const MAX_SHOWN_REASONS = 3;
 
-  const gameVersion = manifest?.gameVersion || '1.21.1';
+export default function ModrinthStoreView({ manifest, hideHeader = false, openRequest = null }) {
+  const [busyKey, setBusyKey] = useState(null);
+  const [installedKeys, setInstalledKeys] = useState({});
+  const [userMods, setUserMods] = useState([]);
+  const [notice, setNotice] = useState(null);
+
+  const gameVersion = manifest?.gameVersion || '26.3';
   const loader = manifest?.loader || 'fabric';
-
-  // Suchen
-  const performSearch = async (query = '', type = activeType) => {
-    setLoading(true);
-    try {
-      const data = await ModrinthService.searchProjects({
-        query,
-        projectType: type,
-        gameVersion,
-        loader: type === 'mod' ? loader : '',
-        limit: 24
-      });
-      setProjects(data.hits || []);
-    } catch (err) {
-      console.error('Fehler bei Modrinth-Suche:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const packMods = getManifestMods(manifest).filter(mod => mod.side !== 'server');
 
   useEffect(() => {
-    performSearch(searchQuery, activeType);
-  }, [activeType]);
+    window.electronAPI?.getUserMods().then(setUserMods);
+  }, []);
 
-  const handleSearchSubmit = (e) => {
-    e.preventDefault();
-    performSearch(searchQuery, activeType);
+  const findPackMod = (project) => packMods.find(mod => mod.projectId === project.id || mod.slug === project.slug);
+  const findUserMod = (project) => userMods.find(mod => mod.projectId === project.id);
+
+  const showInstallResult = (project, result, wantedVersion) => {
+    if (result.success) {
+      const dependencies = result.installed.filter(mod => mod.projectId !== result.chosen.projectId);
+      const newerRejected = wantedVersion ? null : result.skipped[0];
+      setNotice({
+        type: 'success',
+        title: `${project.title} ${result.chosen.versionNumber} ist installiert`,
+        lines: [
+          ...(newerRejected ? [`Neuere Version ${newerRejected.versionNumber} passt nicht zum Server: ${newerRejected.reason}`] : []),
+          ...(dependencies.length > 0 ? [`Mitinstalliert: ${dependencies.map(mod => `${mod.name} ${mod.versionNumber}`).join(', ')}`] : []),
+          ...result.warnings
+        ]
+      });
+      return;
+    }
+
+    setNotice({
+      type: 'error',
+      title: `${project.title} kann nicht installiert werden`,
+      lines: result.error
+        ? [result.error]
+        : result.skipped.length > 0
+          ? result.skipped.slice(0, MAX_SHOWN_REASONS).map(skip => `${skip.versionNumber}: ${skip.reason}`)
+          : [result.reason]
+    });
   };
 
-  // Installation einer Mod / eines Shaders / Resourcepacks
-  const handleInstall = async (project) => {
-    setInstallingId(project.project_id);
+  // Mods werden gegen die Modliste des Servers geprüft und samt Abhängigkeiten installiert
+  const handleInstallMod = async (project, versionId = null) => {
+    setBusyKey(versionId || project.id);
+    setNotice(null);
     try {
-      // 1. Versionen für das Projekt abrufen
-      const versions = await ModrinthService.getProjectVersions(project.project_id, {
+      const resolvedPack = await ModrinthService.resolveRequiredMods(getManifestMods(manifest), gameVersion, loader);
+      const result = await window.electronAPI.installUserMod({
+        projectId: project.id,
+        versionId,
+        packMods: resolvedPack,
         gameVersion,
-        loader: activeType === 'mod' ? loader : ''
+        loader
       });
-
-      if (!versions || versions.length === 0) {
-        alert(`Keine kompatible Version für Minecraft ${gameVersion} (${loader}) gefunden.`);
-        return;
-      }
-
-      const version = versions[0];
-      const primaryFile = version.files.find(f => f.primary) || version.files[0];
-      if (!primaryFile) {
-        alert('Keine gültige Download-Datei gefunden.');
-        return;
-      }
-
-      // 2. Zielordner festlegen
-      const category = activeType === 'mod' ? 'mods' : activeType === 'shader' ? 'shaderpacks' : 'resourcepacks';
-
-      if (window.electronAPI) {
-        const result = await window.electronAPI.downloadModrinthFile({
-          url: primaryFile.url,
-          filename: primaryFile.filename,
-          category
-        });
-
-        if (result.success) {
-          setInstalledMap(prev => ({ ...prev, [project.project_id]: true }));
-        } else {
-          alert(`Download fehlgeschlagen: ${result.error}`);
-        }
-      }
+      if (result.mods) setUserMods(result.mods);
+      showInstallResult(project, result, Boolean(versionId));
     } catch (err) {
-      alert(`Installationsfehler: ${err.message}`);
+      showInstallResult(project, { success: false, error: err.message, skipped: [], warnings: [] });
     } finally {
-      setInstallingId(null);
+      setBusyKey(null);
     }
   };
 
-  const tabs = [
-    { id: 'mod', label: 'Mods', icon: Package },
-    { id: 'shader', label: 'Shaderpacks', icon: Sparkles },
-    { id: 'resourcepack', label: 'Resourcepacks', icon: Palette }
-  ];
+  const handleRemoveMod = async (project) => {
+    setBusyKey(project.id);
+    setNotice(null);
+    const result = await window.electronAPI.removeUserMod(project.id);
+    setBusyKey(null);
+    if (result.success) {
+      setUserMods(result.mods);
+    } else {
+      setNotice({ type: 'error', title: `${project.title} kann nicht entfernt werden`, lines: [result.error] });
+    }
+  };
+
+  // Shader und Resourcepacks hängen nicht von der Modliste ab
+  const installFile = async (project, version, type, key) => {
+    setBusyKey(key);
+    setNotice(null);
+    try {
+      const primaryFile = version?.files.find(f => f.primary) || version?.files[0];
+      if (!primaryFile) throw new Error(`Keine Version für Minecraft ${gameVersion} gefunden.`);
+
+      const result = await window.electronAPI.downloadModrinthFile({
+        url: primaryFile.url,
+        filename: primaryFile.filename,
+        category: type.installDir
+      });
+      if (!result.success) throw new Error(result.error);
+
+      setInstalledKeys(prev => ({ ...prev, [key]: true }));
+    } catch (err) {
+      setNotice({ type: 'error', title: `${project.title} konnte nicht installiert werden`, lines: [err.message] });
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleInstallLatestFile = async (project, type) => {
+    setBusyKey(project.id);
+    try {
+      const versions = await ModrinthService.getProjectVersions(project.id, { gameVersion });
+      await installFile(project, versions.find(v => v.version_type === 'release') || versions[0], type, project.id);
+    } catch (err) {
+      setBusyKey(null);
+      setNotice({ type: 'error', title: `${project.title} konnte nicht installiert werden`, lines: [err.message] });
+    }
+  };
+
+  const renderDoneButton = (label) => (
+    <button type="button" className="btn-secondary mr-action-button mr-action-done" disabled>
+      <Check size={13} /> <span>{label}</span>
+    </button>
+  );
+
+  const renderInstallButton = (key, onClick, primary, label = 'Installieren') => {
+    const isBusy = busyKey === key;
+    return (
+      <button
+        type="button"
+        className={`mr-action-button ${primary ? 'btn-primary' : 'btn-secondary'}`}
+        onClick={onClick}
+        disabled={Boolean(busyKey)}
+      >
+        {isBusy ? <RefreshCw size={13} className="spin" /> : <Download size={13} />}
+        <span>{isBusy ? 'Wird geprüft...' : label}</span>
+      </button>
+    );
+  };
+
+  const renderAction = (project, type) => {
+    if (!type.installDir) {
+      return (
+        <button type="button" className="btn-secondary mr-action-button" onClick={() => openExternal(getProjectUrl(type, project.slug))}>
+          <ExternalLink size={13} /> <span>Öffnen</span>
+        </button>
+      );
+    }
+
+    if (type.id !== 'mod') {
+      if (installedKeys[project.id]) return renderDoneButton('Installiert');
+      return renderInstallButton(project.id, () => handleInstallLatestFile(project, type), true);
+    }
+
+    if (findPackMod(project)) return renderDoneButton('Im Modpack');
+
+    if (findUserMod(project)) {
+      return (
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {renderDoneButton('Installiert')}
+          <button
+            type="button"
+            className="btn-secondary mr-action-button"
+            style={{ color: '#ef4444' }}
+            disabled={Boolean(busyKey)}
+            onClick={() => handleRemoveMod(project)}
+            title="Mod entfernen"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      );
+    }
+
+    return renderInstallButton(project.id, () => handleInstallMod(project), true);
+  };
+
+  const renderVersionAction = (project, version, type) => {
+    if (!type.installDir) return null;
+
+    if (type.id !== 'mod') {
+      if (installedKeys[version.id]) return renderDoneButton('Installiert');
+      return renderInstallButton(version.id, () => installFile(project, version, type, version.id), false);
+    }
+
+    const packMod = findPackMod(project);
+    if (packMod) return packMod.versionId === version.id ? renderDoneButton('Im Modpack') : null;
+
+    const userMod = findUserMod(project);
+    if (userMod) return userMod.versionId === version.id ? renderDoneButton('Installiert') : null;
+
+    return renderInstallButton(version.id, () => handleInstallMod(project, version.id), false);
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      {/* Header mit Suchleiste und Tabs */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      {!hideHeader && (
+        <div style={{ flexShrink: 0 }}>
+          <h1 className="app-page-title">
             Modrinth Store
           </h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
-            Finde und installiere kompatible Erweiterungen direkt mit einem Klick.
+          <p className="app-page-subtitle">
+            Zeigt nur, was zum Server passt ({gameVersion} · {loader}). Benötigte Mods werden automatisch mitinstalliert, und passt die neueste Version nicht zur Modliste des Servers, wird eine ältere genommen.
           </p>
         </div>
+      )}
 
-        {/* Typ-Filter-Buttons */}
-        <div style={{ display: 'flex', gap: '6px', background: 'rgba(0,0,0,0.3)', padding: '4px', borderRadius: '12px', border: '1px solid var(--border-card)' }}>
-          {tabs.map(tab => {
-            const Icon = tab.icon;
-            const active = activeType === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveType(tab.id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '8px 14px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  background: active ? 'var(--color-accent)' : 'transparent',
-                  color: active ? '#fff' : 'var(--text-muted)',
-                  fontWeight: 600,
-                  fontSize: '13px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
-                }}
-              >
-                <Icon size={15} />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Suche & Kompatibilitätsinfo */}
-      <form onSubmit={handleSearchSubmit} className="modrinth-search-bar">
-        <Search size={18} style={{ color: 'var(--text-muted)' }} />
-        <input
-          type="text"
-          placeholder={`${tabs.find(t => t.id === activeType)?.label} auf Modrinth suchen...`}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-        <div className="badge badge-accent" style={{ fontSize: '11px', gap: '4px' }}>
-          <Filter size={11} /> {gameVersion} • {loader}
-        </div>
-      </form>
-
-      {/* Grid von Projekten */}
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: '15px' }}>Durchsuche Modrinth-Katalog...</div>
-        </div>
-      ) : projects.length === 0 ? (
-        <div className="glass-card" style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
-          Keine passenden Erweiterungen gefunden. Versuche einen anderen Suchbegriff.
-        </div>
-      ) : (
-        <div className="modrinth-grid">
-          {projects.map(project => {
-            const isInstalled = installedMap[project.project_id];
-            const isBusy = installingId === project.project_id;
-
-            return (
-              <div key={project.project_id} className="mod-card">
-                <div className="mod-card-header">
-                  {project.icon_url ? (
-                    <img src={project.icon_url} alt={project.title} className="mod-card-icon" />
-                  ) : (
-                    <div className="mod-card-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Package size={20} color="var(--text-muted)" />
-                    </div>
-                  )}
-                  <div style={{ overflow: 'hidden' }}>
-                    <div className="mod-card-title" title={project.title}>
-                      {project.title}
-                    </div>
-                    <div className="mod-card-author">von {project.author}</div>
-                  </div>
-                </div>
-
-                <div className="mod-card-desc" title={project.description}>
-                  {project.description}
-                </div>
-
-                <div className="mod-card-footer">
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', gap: '8px' }}>
-                    <span>{(project.downloads || 0).toLocaleString()} Downloads</span>
-                  </div>
-
-                  <button
-                    className={isInstalled ? "btn-secondary" : "btn-primary"}
-                    style={{
-                      padding: '6px 12px',
-                      fontSize: '12px',
-                      borderRadius: '8px',
-                      background: isInstalled ? 'rgba(16, 185, 129, 0.2)' : undefined,
-                      borderColor: isInstalled ? '#10b981' : undefined,
-                      color: isInstalled ? '#10b981' : undefined
-                    }}
-                    onClick={() => handleInstall(project)}
-                    disabled={isBusy || isInstalled}
-                  >
-                    {isInstalled ? (
-                      <>
-                        <Check size={13} /> Installiert
-                      </>
-                    ) : isBusy ? (
-                      'Lädt...'
-                    ) : (
-                      <>
-                        <Download size={13} /> Installieren
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+      {notice && (
+        <div className={`mr-notice mr-notice-${notice.type}`} style={{ flexShrink: 0 }}>
+          {notice.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700 }}>{notice.title}</div>
+            {notice.lines.map((line, index) => <div key={index} className="mr-notice-line">{line}</div>)}
+          </div>
+          <button type="button" className="mr-icon-button" onClick={() => setNotice(null)} title="Schließen">
+            <X size={15} />
+          </button>
         </div>
       )}
+
+      <ModrinthBrowser
+        lockedGameVersion={gameVersion}
+        lockedLoader={loader}
+        renderAction={renderAction}
+        renderVersionAction={renderVersionAction}
+        openRequest={openRequest}
+      />
     </div>
   );
 }

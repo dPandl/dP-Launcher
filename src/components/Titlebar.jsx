@@ -1,16 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Minus, Square, X, Flame, Snowflake, Flower2, Sun } from 'lucide-react';
-
-const SEASON_ICONS = {
-  autumn: Flame,
-  winter: Snowflake,
-  spring: Flower2,
-  summer: Sun
-};
+import { Minus, Square, X } from 'lucide-react';
 
 export default function Titlebar({ activeSeason, currentVersion }) {
   const [isMaximized, setIsMaximized] = useState(false);
-  const SeasonIcon = SEASON_ICONS[activeSeason.id] || Flame;
 
   useEffect(() => {
     if (window.electronAPI) {
@@ -37,9 +29,23 @@ export default function Titlebar({ activeSeason, currentVersion }) {
   return (
     <header className="titlebar">
       <div className="titlebar-left">
-        <SeasonIcon size={18} style={{ color: 'var(--color-accent)' }} />
-        <span>Minecraft Server Launcher</span>
-        <span className="badge badge-accent" style={{ fontSize: '11px', padding: '2px 8px' }}>
+        <img
+          src={`${import.meta.env.BASE_URL}app-icon.png`}
+          alt="dP Launcher"
+          style={{ width: '22px', height: '22px', objectFit: 'contain', flexShrink: 0, filter: 'drop-shadow(0 2px 6px var(--color-glow))' }}
+        />
+        <span>dP Launcher</span>
+        <span
+          style={{
+            fontSize: '11px',
+            fontWeight: 700,
+            padding: '2px 8px',
+            borderRadius: '999px',
+            background: 'var(--color-primary-soft)',
+            color: 'var(--color-primary-text)',
+            border: '1px solid var(--color-primary-border)'
+          }}
+        >
           v{currentVersion} • {activeSeason.name}
         </span>
       </div>

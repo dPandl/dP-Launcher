@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import http from 'http';
 
 console.log('[Dev] Starte Vite Dev Server...');
@@ -6,10 +6,20 @@ console.log('[Dev] Starte Vite Dev Server...');
 const isWin = process.platform === 'win32';
 const npxCmd = isWin ? 'npx.cmd' : 'npx';
 
+// Vite darf nicht aus dem Terminal lesen, sonst fehlen dem Terminal Tastendrücke
 const vite = spawn(npxCmd, ['vite', '--mode', 'electron'], {
-  stdio: 'inherit',
+  stdio: ['ignore', 'inherit', 'inherit'],
   shell: isWin
 });
+
+// Unter Windows beendet vite.kill() nur die Shell, Vite selbst liefe weiter
+function stopVite() {
+  if (isWin) {
+    spawnSync('taskkill', ['/pid', String(vite.pid), '/T', '/F'], { stdio: 'ignore' });
+  } else {
+    vite.kill();
+  }
+}
 
 function waitForVite(url, timeout = 30000) {
   const start = Date.now();
@@ -39,12 +49,12 @@ waitForVite('http://localhost:5173')
 
     electron.on('close', (code) => {
       console.log(`[Dev] Electron beendet (${code}). Stoppe Vite...`);
-      vite.kill();
+      stopVite();
       process.exit(code || 0);
     });
   })
   .catch(err => {
     console.error('[Dev] Fehler:', err.message);
-    vite.kill();
+    stopVite();
     process.exit(1);
   });

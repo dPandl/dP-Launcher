@@ -1,0 +1,115 @@
+/* Landingpage im Look der App: gleiche Farben, Glas-Karten, runde Knöpfe und die echte App als Vorschau */
+
+/* Erlaubt echtes Web-Scrollen auf html und body, wenn die Landingpage aktiv ist */
+html.landing-page-active,
+body.landing-page-active {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  height: auto !important;
+  min-height: 100% !important;
+  user-select: auto !important;
+}
+
+html.landing-page-active body {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  height: auto !important;
+  min-height: 100vh !important;
+}
+
+html.landing-page-active #root {
+  min-height: 100vh;
+  height: auto !important;
+}
+
+body.landing-page-active * {
+  user-select: auto;
+}
+
+.lp {
+  min-height: 100vh;
+  background: var(--bg-primary);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  line-height: 1.55;
+}
+
+.lp *, .lp *::before, .lp *::after { box-sizing: border-box; }
+.lp a { color: inherit; }
+.lp h1, .lp h2, .lp h3, .lp p { margin: 0; }
+.lp-wrap { width: 100%; max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+/* Kopfzeile wie die Titelleiste der App */
+.lp-nav { border-bottom: 1px solid var(--border-card); background: var(--bg-card); }
+.lp-nav-inner { display: flex; align-items: center; gap: 24px; height: 64px; }
+.lp-brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 800; font-size: 16px; }
+.lp-brand img { width: 28px; height: 28px; object-fit: contain; }
+.lp-pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--color-primary-soft); color: var(--color-primary-text); border: 1px solid var(--color-primary-border); }
+.lp-nav-links { display: flex; gap: 6px; margin-left: auto; }
+.lp-nav-links a { text-decoration: none; padding: 7px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: var(--text-muted); transition: background-color .15s ease, color .15s ease; }
+.lp-nav-links a:hover { background: var(--bg-well); color: var(--text-main); }
+
+/* Einstieg */
+.lp-hero { padding: 56px 0 28px; }
+.lp-hero-text { max-width: 760px; }
+.lp-h1 { font-size: clamp(32px, 5vw, 50px); font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; margin-bottom: 18px !important; }
+.lp-lead { font-size: 17px; color: var(--text-muted); margin-bottom: 26px !important; }
+.lp-cta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; position: relative; }
+.lp-cta .btn-primary, .lp-cta .btn-secondary { text-decoration: none; display: inline-flex; align-items: center; gap: 8px; }
+.lp-menu { position: absolute; top: calc(100% + 8px); left: 0; min-width: 250px; background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 16px; padding: 6px; z-index: 30; box-shadow: 0 14px 30px rgba(0, 0, 0, 0.35); }
+.lp-menu a { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 10px; text-decoration: none; font-size: 13.5px; font-weight: 600; }
+.lp-menu a:hover { background: var(--bg-well); }
+.lp-facts { margin-top: 14px !important; font-size: 13px; color: var(--text-muted); }
+
+/* Echte App als Vorschau */
+.lp-preview { padding: 12px 0 56px; }
+.lp-preview-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.lp-preview-bar p { font-size: 13.5px; color: var(--text-muted); }
+.lp-seasons { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 999px; background: var(--bg-well); border: 1px solid var(--border-card); }
+.lp-seasons button { border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 12.5px; font-weight: 600; padding: 6px 14px; border-radius: 999px; cursor: pointer; transition: all .15s ease; }
+.lp-seasons button:hover { color: var(--text-main); }
+.lp-seasons button[aria-pressed="true"] { background: var(--color-primary); color: #fff; font-weight: 700; }
+.lp-frame { position: relative; width: 100%; border-radius: 20px; overflow: hidden; border: 1px solid var(--border-card); background: var(--bg-primary); box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35); }
+.lp-frame iframe { position: absolute; top: 0; left: 0; border: 0; transform-origin: top left; background: var(--bg-primary); }
+
+/* Abschnitte */
+.lp-section { padding: 28px 0 40px; }
+.lp-section-head { margin-bottom: 20px; }
+.lp-h2 { font-size: 26px; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 6px !important; }
+.lp-section-note { color: var(--text-muted); font-size: 14.5px; }
+.lp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.lp-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.lp-card-head svg { color: var(--color-primary); flex-shrink: 0; }
+.lp-card-head h3 { font-size: 16px; font-weight: 700; }
+.lp-card-text { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
+
+.lp-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.lp-step-num { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 999px; background: var(--color-primary); color: #fff; font-weight: 800; font-size: 14px; margin-bottom: 12px; }
+
+.lp-notes ul { margin: 14px 0 18px; padding-left: 20px; }
+.lp-notes li { margin-bottom: 6px; font-size: 14.5px; }
+.lp-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; color: var(--color-primary-text); text-decoration: none; }
+.lp-link:hover { text-decoration: underline; }
+
+.lp-faq { display: flex; flex-direction: column; gap: 10px; }
+.lp-faq details { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 18px; padding: 16px 20px; }
+.lp-faq summary { cursor: pointer; font-weight: 700; font-size: 15px; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.lp-faq summary::-webkit-details-marker { display: none; }
+.lp-faq summary::after { content: '+'; font-size: 20px; line-height: 1; color: var(--color-primary); }
+.lp-faq details[open] summary::after { content: '\2212'; }
+.lp-faq details p { margin-top: 10px; font-size: 14px; color: var(--text-muted); max-width: 46em; }
+
+.lp-footer { border-top: 1px solid var(--border-card); padding: 28px 0 44px; font-size: 13px; color: var(--text-muted); }
+.lp-footer-inner { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px 40px; }
+.lp-footer p { margin-bottom: 4px !important; max-width: 40em; }
+.lp-footer nav { display: flex; gap: 18px; }
+.lp-footer nav a { text-decoration: none; }
+.lp-footer nav a:hover { color: var(--text-main); }
+
+.lp a:focus-visible, .lp button:focus-visible, .lp summary:focus-visible { outline: 3px solid var(--color-primary-border); outline-offset: 3px; }
+
+@media (max-width: 720px) {
+  .lp-nav-links { display: none; }
+  .lp-nav-inner .btn-primary { margin-left: auto; }
+  .lp-hero { padding-top: 36px; }
+}

@@ -5,7 +5,7 @@ export default defineConfig(({ mode }) => {
   const isElectron = mode === 'electron';
   return {
     plugins: [react()],
-    base: isElectron ? './' : '/electron-minecraft-launcher/',
+    base: isElectron ? './' : '/dP-Launcher/',
     server: {
       port: 5173
     }
