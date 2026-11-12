@@ -4552,3 +4552,37 @@ textarea:focus,
   .lce-setting-control { width: 100%; }
   .lce-setting-control input[type="text"], .lce-setting-control input[type="number"] { width: 100% !important; }
 }
+
+/* Release Notes im Update-Fenster: Markdown ohne eigenen Kasten, kompakter */
+.update-notes .mr-markdown {
+  background: none;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.update-notes .mr-markdown h2 { font-size: 15px; margin: 0 0 6px; }
+.update-notes .mr-markdown p { margin: 0 0 8px; }
+.update-notes .mr-markdown ul { margin: 0 0 8px; padding-left: 20px; }
+.update-notes .mr-markdown li { margin: 3px 0; }
+.update-notes-section { margin-top: 14px; }
+.update-notes-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--note-color);
+  margin-bottom: 6px;
+}
+.update-notes-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--note-color) 16%, transparent);
+}
+.update-notes-section li::marker { color: var(--note-color); }

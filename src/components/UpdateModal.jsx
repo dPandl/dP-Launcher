@@ -1,7 +1,51 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDownCircle, RefreshCw, X } from 'lucide-react';
+import { ArrowDownCircle, RefreshCw, X, Sparkles, Bug, SlidersHorizontal, Info } from 'lucide-react';
 import { appAlert } from '../utils/appDialog';
+import { MarkdownView } from './modrinth/modrinthUi';
+
+// Abschnitte der Release Notes bekommen je nach Überschrift eine eigene Farbe und ein Symbol
+const NOTE_STYLES = [
+  { test: /neu|feature|hinzu/i, icon: Sparkles, color: '#10b981' },
+  { test: /fehler|bug|behoben|fix/i, icon: Bug, color: '#ef4444' },
+  { test: /anpassung|änder|verbesser/i, icon: SlidersHorizontal, color: '#3b82f6' }
+];
+
+// Teilt den Markdown-Text an den Überschriften "### ..." in Einleitung und Abschnitte
+function splitReleaseNotes(markdown) {
+  const parts = String(markdown || '').split(/^###\s+/m);
+  const intro = parts.shift() || '';
+  const sections = parts.map(part => {
+    const lineEnd = part.indexOf('\n');
+    return {
+      title: (lineEnd === -1 ? part : part.slice(0, lineEnd)).trim(),
+      body: lineEnd === -1 ? '' : part.slice(lineEnd + 1)
+    };
+  });
+  return { intro, sections };
+}
+
+function ReleaseNotes({ markdown }) {
+  const { intro, sections } = splitReleaseNotes(markdown);
+  return (
+    <div className="update-notes">
+      {intro.trim() && <MarkdownView source={intro} />}
+      {sections.map((section, index) => {
+        const style = NOTE_STYLES.find(entry => entry.test.test(section.title));
+        const Icon = style?.icon || Info;
+        return (
+          <div key={index} className="update-notes-section" style={{ '--note-color': style?.color || 'var(--color-primary)' }}>
+            <div className="update-notes-head">
+              <span className="update-notes-icon"><Icon size={14} /></span>
+              <span>{section.title}</span>
+            </div>
+            {section.body.trim() && <MarkdownView source={section.body} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function UpdateModal({ updateInfo, onClose }) {
   const [downloading, setDownloading] = useState(false);
@@ -68,14 +112,13 @@ export default function UpdateModal({ updateInfo, onClose }) {
               borderRadius: '16px',
               fontSize: '12.5px',
               color: 'var(--text-main)',
-              maxHeight: '150px',
+              maxHeight: '260px',
               overflowY: 'auto',
               marginBottom: '18px',
-              whiteSpace: 'pre-line',
               lineHeight: 1.5
             }}
           >
-            {updateInfo.releaseNotes}
+            <ReleaseNotes markdown={updateInfo.releaseNotes} />
           </div>
         )}
 
