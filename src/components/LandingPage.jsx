@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Download, ChevronDown, ExternalLink, RefreshCw, Layers, ShieldCheck, Palette, Shirt, ServerCog, Package } from 'lucide-react';
+import { Download, ChevronDown, RefreshCw, Layers, ShieldCheck, Palette, Shirt, ServerCog, Package } from 'lucide-react';
 import { releaseNotes } from '../releaseNotes';
 import { applySeasonTheme } from '../services/seasonManager';
 import './LandingPage.css';
 
-const GITHUB_REPO = 'dPandl/dP-Launcher';
-const GITHUB_URL = `https://github.com/${GITHUB_REPO}`;
+const RELEASE_BASE = 'https://github.com/dPandl/dP-Launcher/releases/latest/download';
 
 // Größe, in der die echte App in der Vorschau läuft. Die Vorschau wird nur skaliert, nie umgebrochen.
 const PREVIEW_WIDTH = 1100;
@@ -26,11 +25,11 @@ const FEATURES = [
   { icon: ShieldCheck, title: 'Microsoft-Anmeldung', text: 'Die Anmeldung läuft über das offizielle Microsoft-Konto. Die Zugangsdaten werden verschlüsselt gespeichert.' },
   { icon: Palette, title: 'Saisonales Design', text: 'Farben, Logo und Hintergrundeffekte folgen der Jahreszeit. Du kannst auch ein festes Theme oder eigene Farben wählen.' },
   { icon: Shirt, title: 'Skin Studio', text: 'Dein Skin im 3D-Viewer, mit Classic- und Slim-Modell und einer eigenen Skin-Bibliothek.' },
-  { icon: ServerCog, title: 'Server-Admin', text: 'Modliste pflegen, lokal testen und veröffentlichen, dazu Server-Konsole und Chat über BisectHosting.' }
+  { icon: ServerCog, title: 'Server-Admin', text: 'Modliste pflegen, lokal testen und veröffentlichen, dazu Server-Konsole und Chat über BisectHosting. Die Modpacks deines Servers stellst du auf GitHub bereit.' }
 ];
 
 const STEPS = [
-  { title: 'Launcher herunterladen', text: 'ZIP für Windows oder Paket für Linux laden und an einem beliebigen Ort entpacken.' },
+  { title: 'Launcher herunterladen', text: 'Als Installer oder als portable Version, für Windows oder Linux.' },
   { title: 'Mit Microsoft anmelden', text: 'App starten und einmal mit dem Minecraft-Konto anmelden.' },
   { title: 'Auf Spielen klicken', text: 'Der Launcher lädt Fabric, Java und alle Mods des Servers und startet Minecraft.' }
 ];
@@ -38,15 +37,14 @@ const STEPS = [
 const FAQ = [
   { q: 'Brauche ich ein gekauftes Minecraft?', a: 'Ja. Die Anmeldung läuft über Microsoft, du brauchst also eine Minecraft Java Edition mit gültiger Lizenz.' },
   { q: 'Muss ich Java selbst installieren?', a: 'Nein. Der Launcher nutzt Java 21, das Minecraft 1.21.1 braucht, und richtet es bei Bedarf ein.' },
-  { q: 'Wie kommen Updates für den Launcher an?', a: 'Beim Start prüft der Launcher, ob es auf GitHub eine neue Version gibt. Das Update lässt sich mit einem Klick in der App einspielen.' }
+  { q: 'Wo liegt das Modpack meines Servers?', a: 'Der Server-Admin stellt die Modliste in einem GitHub-Repository bereit. Der Launcher liest sie von dort und hält deine Dateien auf diesem Stand.' },
+  { q: 'Wie kommen Updates für den Launcher an?', a: 'Beim Start prüft der Launcher, ob es eine neue Version gibt. Das Update lässt sich mit einem Klick in der App einspielen.' }
 ];
 
 export default function LandingPage() {
   const latestLocalRelease = releaseNotes[0] || { version: '0.1.0' };
-  const [version, setVersion] = useState(latestLocalRelease.version);
-  const [downloadUrl, setDownloadUrl] = useState(`${GITHUB_URL}/releases/latest`);
-  const [assets, setAssets] = useState([]);
-  const [fileSize, setFileSize] = useState(null);
+  const version = latestLocalRelease.version;
+  const [installType, setInstallType] = useState('installer'); // 'installer' | 'portable'
   const [selectedSeason, setSelectedSeason] = useState('default');
   const [showDropdown, setShowDropdown] = useState(false);
   const [osName, setOsName] = useState('Windows');
@@ -90,38 +88,14 @@ export default function LandingPage() {
     return () => observer.disconnect();
   }, []);
 
-  // Neuestes GitHub Release abfragen
-  useEffect(() => {
-    fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`)
-      .then(res => {
-        if (!res.ok) throw new Error('Kein Release oder Rate Limit');
-        return res.json();
-      })
-      .then(data => {
-        if (data.tag_name) setVersion(data.tag_name.replace(/^v/, ''));
-        if (Array.isArray(data.assets)) {
-          setAssets(data.assets);
-          const win = data.assets.find(a => a.name.toLowerCase().includes('win') && a.name.endsWith('.zip'));
-          const linux = data.assets.find(a => a.name.toLowerCase().includes('linux') || a.name.endsWith('.appimage'));
-          if (osName === 'Linux' && linux) {
-            setDownloadUrl(linux.browser_download_url);
-            if (linux.size) setFileSize(`${(linux.size / (1024 * 1024)).toFixed(0)} MB`);
-          } else if (win) {
-            setDownloadUrl(win.browser_download_url);
-            if (win.size) setFileSize(`${(win.size / (1024 * 1024)).toFixed(0)} MB`);
-          } else if (data.html_url) {
-            setDownloadUrl(data.html_url);
-          }
-        }
-      })
-      .catch(() => {
-        // Fallback bleibt der direkte GitHub Release Link
-      });
-  }, [osName]);
-
-  const winAsset = assets.find(a => a.name.toLowerCase().includes('win') && a.name.endsWith('.zip'));
-  const linuxAppImage = assets.find(a => a.name.endsWith('.AppImage'));
-  const linuxZip = assets.find(a => a.name.toLowerCase().includes('linux') && a.name.endsWith('.zip'));
+  const file = (ext) => `${RELEASE_BASE}/dP-Launcher-${version}-${ext}`;
+  const DOWNLOADS = {
+    windows: { installer: { label: 'Windows Installer (.exe)', url: file('win.exe') }, portable: { label: 'Windows Portable (.zip)', url: file('win.zip') } },
+    linux: { installer: { label: 'Linux (.zip)', url: file('linux.zip') }, portable: { label: 'Linux (.zip)', url: file('linux.zip') } }
+  };
+  const platform = osName === 'Linux' ? 'linux' : 'windows';
+  const current = DOWNLOADS[platform][installType];
+  const downloadUrl = current.url;
 
   return (
     <div className="lp" data-theme="dark">
@@ -139,7 +113,6 @@ export default function LandingPage() {
             <a href="#quickstart">Schnellstart</a>
             <a href="#changelog">Neu</a>
             <a href="#faq">Fragen</a>
-            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
           </nav>
           <a href={downloadUrl} className="btn-primary" style={{ textDecoration: 'none', padding: '8px 18px', fontSize: '13.5px' }}>
             <Download size={15} aria-hidden="true" />
@@ -159,30 +132,32 @@ export default function LandingPage() {
                 Die Dateien kommen direkt von Modrinth, niemand muss mehr eine ZIP herumschicken.
               </p>
 
+              <div className="lp-seasons" role="group" aria-label="Art der Installation" style={{ marginBottom: '14px' }}>
+                <button type="button" aria-pressed={installType === 'installer'} onClick={() => setInstallType('installer')}>Installer</button>
+                <button type="button" aria-pressed={installType === 'portable'} onClick={() => setInstallType('portable')}>Portable</button>
+              </div>
+
               <div className="lp-cta">
                 <a href={downloadUrl} className="btn-primary">
                   <Download size={18} aria-hidden="true" />
-                  Download für {osName}
+                  {current.label}
                 </a>
                 <button type="button" className="btn-secondary" onClick={() => setShowDropdown(prev => !prev)} aria-expanded={showDropdown}>
-                  Andere Plattformen
+                  Alle Downloads
                   <ChevronDown size={15} aria-hidden="true" />
                 </button>
 
                 {showDropdown && (
                   <div className="lp-menu">
-                    {winAsset && <a href={winAsset.browser_download_url}><Download size={14} aria-hidden="true" />Windows (ZIP, x64)</a>}
-                    {linuxAppImage && <a href={linuxAppImage.browser_download_url}><Download size={14} aria-hidden="true" />Linux (AppImage)</a>}
-                    {linuxZip && <a href={linuxZip.browser_download_url}><Download size={14} aria-hidden="true" />Linux (ZIP)</a>}
-                    <a href={`${GITHUB_URL}/releases`} target="_blank" rel="noopener noreferrer">
-                      <ExternalLink size={14} aria-hidden="true" />Alle Releases auf GitHub
-                    </a>
+                    {[DOWNLOADS.windows.installer, DOWNLOADS.windows.portable, DOWNLOADS.linux.portable].map(item => (
+                      <a key={item.url} href={item.url}><Download size={14} aria-hidden="true" />{item.label}</a>
+                    ))}
                   </div>
                 )}
               </div>
 
               <p className="lp-facts">
-                Version {version}{fileSize ? ` (${fileSize})` : ''} · Windows 10/11 und Linux · quelloffen
+                Version {version} · Windows 10/11 und Linux · Installer oder portable
               </p>
             </div>
           </div>
@@ -274,10 +249,6 @@ export default function LandingPage() {
               <ul>
                 {latestLocalRelease.whatsNew?.map((item, i) => <li key={i}>{item}</li>)}
               </ul>
-              <a href={`${GITHUB_URL}/releases`} target="_blank" rel="noopener noreferrer" className="lp-link">
-                Frühere Versionen auf GitHub
-                <ExternalLink size={14} aria-hidden="true" />
-              </a>
             </div>
           </div>
         </section>
@@ -303,12 +274,10 @@ export default function LandingPage() {
       <footer className="lp-footer">
         <div className="lp-wrap lp-footer-inner">
           <div>
-            <p><strong>dP Launcher</strong>, ein quelloffener Launcher für Minecraft-Communityserver.</p>
+            <p><strong>dP Launcher</strong>, ein Launcher für Minecraft-Communityserver.</p>
             <p>Nicht mit Mojang Studios oder Microsoft verbunden. Minecraft ist eine Marke von Mojang Synergies AB.</p>
           </div>
           <nav aria-label="Links">
-            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
-            <a href={`${GITHUB_URL}/releases`} target="_blank" rel="noopener noreferrer">Releases</a>
             <a href={downloadUrl}>Download</a>
           </nav>
         </div>

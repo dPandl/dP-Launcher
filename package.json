@@ -27,7 +27,7 @@
     "copyright": "Copyright © 2026 Pascal",
     "asar": true,
     "compression": "normal",
-    "artifactName": "${productName}-${version}-${os}.${ext}",
+    "artifactName": "dP-Launcher-${version}-${os}.${ext}",
     "publish": {
       "provider": "github",
       "owner": "dPandl",
@@ -77,7 +77,6 @@
     "linux": {
       "icon": "public/app-icon.png",
       "target": [
-        "AppImage",
         "zip"
       ],
       "category": "Game"
