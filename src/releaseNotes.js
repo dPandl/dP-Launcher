@@ -1,5 +1,19 @@
 export const releaseNotes = [
   {
+    version: '0.1.2',
+    date: '12.11.2026',
+    title: 'Übersichtlichere Update-Hinweise',
+    whatsNew: [
+      'Das Update-Fenster zeigt die Release Notes mit Überschriften und farbigen Abschnitten für Neuerungen, Fehlerbehebungen und Anpassungen'
+    ],
+    bugFixes: [
+      'Die Release Notes im Update-Fenster erscheinen nicht mehr als roher Text mit Markdown-Zeichen'
+    ],
+    adjustments: [
+      'Die Webseite nutzt das App-Icon als Tab-Symbol'
+    ]
+  },
+  {
     version: '0.1.1',
     date: '12.11.2026',
     title: 'Server-Admin, Versionsauswahl und Darstellung für Server',
