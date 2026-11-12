@@ -7,7 +7,35 @@ export const SERVER_FILE_EXTENSION = 'dpmcserver';
 export const SERVER_FILE_FORMAT = 'dpmcserver';
 export const SERVER_FILE_VERSION = 1;
 
-const NAME_MAX = 60;
+// Banner: PNG im Verhältnis 30:10 (3:1), als Data-URL in Serverdatei und Server-Eintrag
+export const BANNER_MAX_BYTES = 3 * 1024 * 1024;
+export const SERVER_FILE_MAX_CHARS = 6000000;
+const BANNER_PREFIX = 'data:image/png;base64,';
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+export function isPngBuffer(buffer) {
+  return Buffer.isBuffer(buffer) && buffer.length > 8 && buffer.subarray(0, 8).equals(PNG_SIGNATURE);
+}
+
+export function bannerToDataUrl(buffer) {
+  return BANNER_PREFIX + buffer.toString('base64');
+}
+
+export function bannerFromDataUrl(value) {
+  return Buffer.from(value.slice(BANNER_PREFIX.length), 'base64');
+}
+
+export function isValidBannerDataUrl(value) {
+  if (typeof value !== 'string' || !value.startsWith(BANNER_PREFIX)) return false;
+  const base64 = value.slice(BANNER_PREFIX.length);
+  if (!base64 || base64.length > Math.ceil((BANNER_MAX_BYTES * 4) / 3) + 8) return false;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) return false;
+  return isPngBuffer(Buffer.from(base64.slice(0, 24), 'base64'));
+}
+
+export const SERVER_NAME_MAX = 60;
+export const SERVER_DESCRIPTION_MAX = 140;
+const NAME_MAX = SERVER_NAME_MAX;
 const ADDRESS_RE = /^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:\d{1,5})?$/;
 const OWNER_REPO_RE = /^[A-Za-z0-9_.-]+$/;
 const BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
@@ -24,6 +52,14 @@ export function parseGithubRef(value) {
   const [owner, repo, ...rest] = text.split('/');
   if (rest.length > 0 || !owner || !repo || !OWNER_REPO_RE.test(owner) || !OWNER_REPO_RE.test(repo)) return null;
   return { owner, repo };
+}
+
+// Adresse im Format host oder host:port
+export function isValidServerAddress(value) {
+  const address = String(value ?? '').trim();
+  if (!ADDRESS_RE.test(address)) return false;
+  const port = address.split(':')[1];
+  return port === undefined || (Number(port) >= 1 && Number(port) <= 65535);
 }
 
 // Prüft Eingaben für einen Server (aus dem Formular oder einer Datei) und gibt eine bereinigte Fassung zurück
@@ -65,7 +101,11 @@ export function sanitizeServerInput(input) {
     chatPort = port;
   }
 
-  return { ok: true, server: { name, address, owner, repo, branch, chatPort } };
+  const description = cleanText(input?.description).slice(0, SERVER_DESCRIPTION_MAX);
+
+  const banner = isValidBannerDataUrl(input?.banner) ? input.banner : '';
+
+  return { ok: true, server: { name, description, banner, address, owner, repo, branch, chatPort } };
 }
 
 // Ordnername im Instanz-Verzeichnis: der Servername, bereinigt und eindeutig
@@ -91,6 +131,8 @@ export function createServerRecord(clean, takenFolders) {
   return {
     id: crypto.randomUUID(),
     name: clean.name,
+    description: clean.description || '',
+    banner: clean.banner || '',
     folder: folderNameFor(clean.name, takenFolders),
     address: clean.address,
     owner: clean.owner,
@@ -102,14 +144,18 @@ export function createServerRecord(clean, takenFolders) {
 }
 
 // Inhalt einer .dpmcserver-Datei. Enthält nie Tokens oder Zugangsdaten.
-export function buildServerFile(server, nameOverride) {
+export function buildServerFile(server, nameOverride, descriptionOverride, bannerOverride) {
   const name = cleanText(nameOverride || server.name).slice(0, NAME_MAX) || server.name;
+  const description = cleanText(descriptionOverride ?? server.description).slice(0, SERVER_DESCRIPTION_MAX);
   const file = {
     format: SERVER_FILE_FORMAT,
     version: SERVER_FILE_VERSION,
     name,
     address: server.address
   };
+  if (description) file.description = description;
+  const banner = bannerOverride ?? server.banner;
+  if (isValidBannerDataUrl(banner)) file.banner = banner;
   if (server.owner && server.repo) {
     file.modpack = { github: `${server.owner}/${server.repo}`, branch: server.branch || 'main' };
   }
@@ -119,7 +165,7 @@ export function buildServerFile(server, nameOverride) {
 
 // Liest und prüft den Text einer .dpmcserver-Datei
 export function parseServerFile(text) {
-  if (typeof text !== 'string' || text.length > 20000) return { ok: false, error: 'Die Datei ist zu groß oder leer.' };
+  if (typeof text !== 'string' || text.length > SERVER_FILE_MAX_CHARS) return { ok: false, error: 'Die Datei ist zu groß oder leer.' };
   let data;
   try {
     data = JSON.parse(text);
@@ -134,6 +180,8 @@ export function parseServerFile(text) {
   }
   return sanitizeServerInput({
     name: data.name,
+    description: data.description,
+    banner: data.banner,
     address: data.address,
     github: data.modpack?.github,
     branch: data.modpack?.branch,

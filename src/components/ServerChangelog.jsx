@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Server, Edit3, Save, X, RefreshCw, CheckCircle2, AlertCircle, Calendar, PlusCircle } from 'lucide-react';
+import { Server, Edit3, Save, X, RefreshCw, CheckCircle2, AlertCircle, Calendar, PlusCircle, Sparkles } from 'lucide-react';
 
 // Changelog des ausgewählten Servers (Modpack-Versionen). Admins können ihn hier verfassen.
 export default function ServerChangelog({ manifest, isAdmin = false, onRefreshManifest }) {

@@ -1,7 +1,7 @@
 {
   "name": "electron-minecraft-launcher",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Moderner saisonaler Minecraft Server Launcher mit Modrinth-Integration",
   "author": "Pascal",
   "type": "module",

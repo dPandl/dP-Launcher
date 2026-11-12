@@ -66,6 +66,12 @@ export default function ServerImportModal({ data, onClose, onImported }) {
                 <label style={labelStyle}>Name (so heißt der Ordner dieses Servers)</label>
                 <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} style={{ width: '100%' }} />
               </div>
+              {server.banner && (
+                <img src={server.banner} alt={server.name} style={{ width: '100%', aspectRatio: '3 / 1', objectFit: 'cover', borderRadius: '12px', display: 'block' }} />
+              )}
+              {server.description && (
+                <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--text-muted)', lineHeight: 1.5, overflowWrap: 'anywhere' }}>{server.description}</p>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', fontSize: '13.5px', borderTop: '1px solid var(--border-card)', paddingTop: '12px' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Server-Adresse</span>
                 <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{server.address}</span>

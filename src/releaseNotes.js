@@ -1,5 +1,30 @@
 export const releaseNotes = [
   {
+    version: '0.1.1',
+    date: '12.11.2026',
+    title: 'Server-Admin, Versionsauswahl und Darstellung für Server',
+    whatsNew: [
+      'Versionen von Mods, Resourcepacks und Shadern lassen sich beim Installieren und im Entwurf gezielt auswählen, falls die neueste nicht funktioniert',
+      'Das Server-Admin hat einen eigenen Server mit Name, Adresse und Repository, unabhängig von der Spielliste',
+      'BisectHosting-Zugangsdaten, GitHub-Repository, Darstellung und Server-Datei stehen an einem Ort im Server-Admin',
+      'Name, Beschreibung und Banner (PNG im Verhältnis 30:10, bis Full HD) für Server, auf GitHub für alle Spieler und in der geteilten Serverdatei',
+      'Der Server-Abgleich lädt Mods gebündelt hoch, mit Fortschrittsbalken und Rücksicht auf das Anfrage-Limit des Panels',
+      'Die Startanzeige bleibt, bis Minecraft wirklich offen ist',
+      'Beim Veröffentlichen des Modpacks lässt sich eine eigene Versionsnummer wählen',
+      'Reine Client-Mods lassen sich nach einer Rückfrage direkt auf den Server laden'
+    ],
+    bugFixes: [
+      'Der Ordner-Knopf der Testinstanz öffnet den richtigen Ordner',
+      'Das Veröffentlichen in ein leeres GitHub-Repository funktioniert',
+      'Der Server-Testmodus endet nach dem Veröffentlichen',
+      'Abstürze durch fehlende Symbole in Changelog und Modpack-Ansicht behoben'
+    ],
+    adjustments: [
+      'Mehrzeilige Eingabefelder im Stil der App',
+      'Der Changelog des Servers lässt sich im Server-Admin bearbeiten'
+    ]
+  },
+  {
     version: '0.1.0',
     date: '01.11.2026',
     title: 'Initiale Version des saisonalen Minecraft Launchers',

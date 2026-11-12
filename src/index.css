@@ -1035,6 +1035,26 @@ select,
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
+/* Mehrzeilige Felder: gleiche Optik wie die Eingabefelder, aber mit weicherer Rundung statt Pille */
+textarea {
+  background: var(--bg-input, var(--bg-card));
+  border: 1px solid var(--border-card);
+  border-radius: 20px;
+  padding: 10px 16px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-main);
+  outline: none;
+  box-sizing: border-box;
+  font-family: inherit;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
 input:focus,
 select:focus,
 textarea:focus,

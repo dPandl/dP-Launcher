@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FlaskConical, Zap, Rocket, RefreshCw, RotateCcw, CheckCircle2, AlertCircle, Play, Square, FolderOpen, Shield, Sliders, Check, Search, FileText } from 'lucide-react';
+import { FlaskConical, Zap, Rocket, RefreshCw, RotateCcw, CheckCircle2, AlertCircle, Play, Square, FolderOpen, Shield, Sliders, Check, Search, FileText, Sparkles } from 'lucide-react';
 import { BisectService } from '../../services/bisectService';
 import { diffManifests } from '../../services/modpackService';
-import { bumpVersion, getManifestMods } from '../../../modpackUtils.js';
+import { bumpVersion, getManifestMods, isValidCustomVersion } from '../../../modpackUtils.js';
 import { appConfirm, appAlert } from '../../utils/appDialog';
 import { getLogLineColor } from '../../utils/logFormatter';
 import { getSyncedConfigFiles } from './ConfigSyncCard';
@@ -30,7 +30,6 @@ function Notice({ type, children }) {
   );
 }
 
-const TEST_INSTANCE_SUBDIR = 'instances/modpack-test';
 const MAX_TEST_LOG_LINES = 200;
 
 export default function ModpackPipeline({ draft, published, settings, onPublished }) {
@@ -45,6 +44,7 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
   const [planError, setPlanError] = useState(null);
   const [isApplying, setIsApplying] = useState(false);
   const [applyLog, setApplyLog] = useState([]);
+  const [applyProgress, setApplyProgress] = useState(null);
   const [applyResult, setApplyResult] = useState(null);
   const [backupInfo, setBackupInfo] = useState({ active: false });
   const [isRestoringBackup, setIsRestoringBackup] = useState(false);
@@ -61,6 +61,7 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
   }, [serverId]);
 
   const [bumpType, setBumpType] = useState('patch');
+  const [customVersion, setCustomVersion] = useState('');
   const [changelog, setChangelog] = useState(draft?.changelog || '');
   const [changelogTitle, setChangelogTitle] = useState(draft?.changelogTitle || '');
   const [isPublishing, setIsPublishing] = useState(false);
@@ -76,8 +77,10 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
   const diff = diffManifests(published, draft);
   // Das alte Format hat keine festen Versionen und muss einmal veröffentlicht werden
   const publishedIsPinned = Array.isArray(published?.mods);
-  const canPublish = draft.mods.length > 0 && (diff.total > 0 || !publishedIsPinned);
-  const nextVersion = bumpVersion(published?.modpackVersion, bumpType);
+  const isCustom = bumpType === 'custom';
+  const customVersionValid = isValidCustomVersion(customVersion, published?.modpackVersion);
+  const canPublish = draft.mods.length > 0 && (diff.total > 0 || !publishedIsPinned) && (!isCustom || customVersionValid);
+  const nextVersion = isCustom ? customVersion.trim() : bumpVersion(published?.modpackVersion, bumpType);
   const serverPending = serverPlan && (serverPlan.upload.length > 0 || serverPlan.remove.length > 0);
 
   const loadServerPlan = async () => {
@@ -100,6 +103,11 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
   useEffect(() => {
     if (!window.electronAPI?.onModpackServerLog) return undefined;
     return window.electronAPI.onModpackServerLog(line => setApplyLog(prev => [...prev, line]));
+  }, []);
+
+  useEffect(() => {
+    if (!window.electronAPI?.onModpackServerProgress) return undefined;
+    return window.electronAPI.onModpackServerProgress(setApplyProgress);
   }, []);
 
   useEffect(() => {
@@ -160,9 +168,11 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
     if (!sure) return;
     setIsApplying(true);
     setApplyLog([]);
+    setApplyProgress(null);
     setApplyResult(null);
     const res = await window.electronAPI.applyModpackToServer({ dryRun: false, target: 'draft' });
     setApplyResult(res);
+    setApplyProgress(null);
     setIsApplying(false);
     await checkBackupInfo();
     loadServerPlan();
@@ -231,6 +241,7 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
     setPublishResult(null);
     const res = await window.electronAPI.publishModpack({
       bumpType,
+      customVersion: isCustom ? customVersion.trim() : '',
       changelog,
       title: changelogTitle,
       selectedConfigFiles: getSyncedConfigFiles()
@@ -241,6 +252,8 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
       setChangelog('');
       setChangelogTitle('');
       onPublished(res);
+      // Mit dem Veröffentlichen ist der Server-Testmodus beendet, die Anzeige muss das übernehmen
+      await checkBackupInfo();
     }
   };
 
@@ -263,7 +276,7 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
               <span>{isGameStarting ? 'Wird gestartet...' : 'Lokal testen'}</span>
             </button>
           )}
-          <button className="btn-secondary" onClick={() => window.electronAPI.openGameDir(TEST_INSTANCE_SUBDIR)} title="Ordner der Testinstanz öffnen">
+          <button className="btn-secondary" onClick={() => window.electronAPI.openTestInstanceDir()} title="Ordner der Testinstanz öffnen">
             <FolderOpen size={15} /> Ordner
           </button>
           {testLog.length > 0 && (
@@ -445,6 +458,18 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
               )}
             </div>
 
+            {isApplying && applyProgress && (
+              <div style={{ marginTop: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', fontSize: '12.5px', fontWeight: 600, marginBottom: '6px' }}>
+                  <span>{applyProgress.label}</span>
+                  <span style={{ color: 'var(--color-primary)' }}>{applyProgress.percent}%</span>
+                </div>
+                <div style={{ height: '8px', borderRadius: '999px', background: 'var(--bg-well)', overflow: 'hidden', border: '1px solid var(--border-card)' }}>
+                  <div style={{ width: `${applyProgress.percent}%`, height: '100%', background: 'var(--color-primary)', borderRadius: '999px', transition: 'width 0.3s ease' }} />
+                </div>
+              </div>
+            )}
+
             {applyLog.length > 0 && (
               <div className="selectable-text" style={{ marginTop: '12px', padding: '10px 12px', background: '#070a10', borderRadius: '8px', fontFamily: 'Consolas, Monaco, monospace', fontSize: '12px', color: '#10b981', maxHeight: '160px', overflowY: 'auto' }}>
                 {applyLog.map((line, i) => <div key={i}>{line}</div>)}
@@ -514,6 +539,21 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
           <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
             <input type="radio" name="modpack-bump" checked={bumpType === 'major'} onChange={() => setBumpType('major')} /> Major
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+            <input type="radio" name="modpack-bump" checked={isCustom} onChange={() => setBumpType('custom')} /> Eigene
+          </label>
+          {isCustom && (
+            <input
+              type="text"
+              value={customVersion}
+              onChange={(e) => setCustomVersion(e.target.value)}
+              placeholder="z. B. 0.0.1"
+              maxLength={20}
+              aria-invalid={customVersion !== '' && !customVersionValid}
+              title={`Format 1.2.3, höher als die veröffentlichte Version v${published?.modpackVersion || '0.0.0'}`}
+              style={{ width: '110px', borderColor: customVersion !== '' && !customVersionValid ? '#ef4444' : undefined }}
+            />
+          )}
           <span style={{ flex: 1 }} />
           <button className="btn-primary" onClick={handlePublish} disabled={isPublishing || !canPublish}>
             {isPublishing ? <RefreshCw size={15} className="spin" /> : <Rocket size={15} />}

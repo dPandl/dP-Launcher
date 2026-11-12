@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Server, Shield, RotateCcw, Play, Square, Skull, Cpu, HardDrive,
   Trash2, CheckCircle2, RefreshCw, LogOut, Upload, Sparkles,
-  Box, Check, Activity, HelpCircle, Package, Search, Rocket, GitBranch, Sliders, Terminal, Settings
+  Box, Check, Activity, HelpCircle, Package, Search, Rocket, GitBranch, Sliders, Terminal, Settings, FileText
 } from 'lucide-react';
 import { BisectService } from '../services/bisectService';
 import { createDraftFromManifest } from '../services/modpackService';
@@ -11,10 +11,15 @@ import { ProjectIcon } from './modrinth/modrinthUi';
 import ModpackEditor from './admin/ModpackEditor';
 import ModpackDiscover from './admin/ModpackDiscover';
 import ModpackPipeline from './admin/ModpackPipeline';
+import GithubSettingsCard from './admin/GithubSettingsCard';
+import ServerPresentationCard from './admin/ServerPresentationCard';
+import ServerChangelog from './ServerChangelog';
 import ServerConfigEditor from './admin/ServerConfigEditor';
 import ServerConsoleView from './admin/ServerConsoleView';
 import { appConfirm, appAlert } from '../utils/appDialog';
-import { resolveServerAddress } from '../utils/serverAddress';
+import { resolveServerAddress, getAdminServer } from '../utils/serverAddress';
+import AdminServerCard from './admin/AdminServerCard';
+import BisectCredentialsCard from './admin/BisectCredentialsCard';
 
 export default function AdminPanelView({
   settings,
@@ -25,7 +30,7 @@ export default function AdminPanelView({
   onUpdateSettings,
   onDraftChange,
   onPublished,
-  onOpenSettings
+  onRefreshManifest
 }) {
   // Hauptbereich: 'modpack' | 'server'
   const [section, setSection] = useState('modpack');
@@ -70,11 +75,30 @@ export default function AdminPanelView({
     }
   };
 
+  const adminServer = getAdminServer(settings);
+  const hasRepo = Boolean(adminServer.owner && adminServer.repo);
+
   useEffect(() => {
-    if (manifestReady && !draft) {
+    if (manifestReady && !draft && hasRepo) {
       buildDraftFromPublished();
     }
-  }, [manifestReady, draft]);
+  }, [manifestReady, draft, hasRepo]);
+
+  // Name, Adresse, Repository und Darstellung des verwalteten Servers
+  const repositoryPanel = (
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px', paddingBottom: '14px' }}>
+      <AdminServerCard settings={settings} />
+      <BisectCredentialsCard settings={settings} onUpdateSettings={onUpdateSettings} />
+      <GithubSettingsCard />
+      <ServerPresentationCard settings={settings} manifest={publishedManifest} onRefreshManifest={onRefreshManifest} />
+    </div>
+  );
+
+  // Zu den Zugangsdaten springen: Modpack, Reiter "Server & Repository"
+  const openCredentials = () => {
+    setSection('modpack');
+    setModpackView('repository');
+  };
 
   const handleResetDraft = async () => {
     const sure = await appConfirm('Entwurf verwerfen und durch die veröffentlichte Liste ersetzen?', {
@@ -101,7 +125,7 @@ export default function AdminPanelView({
     const fetchPing = async () => {
       if (window.electronAPI?.checkServerStatus) {
         try {
-          const res = await window.electronAPI.checkServerStatus(resolveServerAddress(settings, manifest));
+          const res = await window.electronAPI.checkServerStatus(getAdminServer(settings)?.address || resolveServerAddress(settings, manifest));
           setServerPing(res);
         } catch (e) { }
       }
@@ -621,13 +645,15 @@ export default function AdminPanelView({
           </button>
         </div>
 
-        {section === 'modpack' && draft && (
+        {section === 'modpack' && (draft || !hasRepo) && (
           <div className="mr-type-tabs" style={{ margin: 0 }}>
             {[
-              { id: 'draft', label: `Entwurf (${draft.mods.length})`, icon: Package },
+              { id: 'draft', label: `Entwurf (${draft?.mods?.length ?? 0})`, icon: Package },
               { id: 'discover', label: 'Mods entdecken', icon: Search },
-              { id: 'pipeline', label: 'Testen & Veröffentlichen', icon: Rocket }
-            ].map(entry => {
+              { id: 'pipeline', label: 'Testen & Veröffentlichen', icon: Rocket },
+              { id: 'changelog', label: 'Changelog', icon: FileText },
+              { id: 'repository', label: 'Server & Repository', icon: GitBranch }
+            ].filter(entry => hasRepo || entry.id === 'repository').map(entry => {
               const Icon = entry.icon;
               return (
                 <button key={entry.id} type="button" className={`mr-type-tab ${modpackView === entry.id ? 'active' : ''}`} onClick={() => setModpackView(entry.id)}>
@@ -641,7 +667,14 @@ export default function AdminPanelView({
       </div>
 
       {section === 'modpack' ? (
-        !draft ? (
+        !draft && !hasRepo ? (
+          <>
+            <div style={{ padding: '10px 16px', marginBottom: '8px', borderRadius: '12px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#d97706', fontSize: '13px', flexShrink: 0 }}>
+              Trage hier Name, Adresse und das GitHub-Repository deines Servers ein. Danach entsteht der Entwurf aus der veröffentlichten Modliste.
+            </div>
+            {repositoryPanel}
+          </>
+        ) : !draft ? (
           <div className="glass-card" style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
             <RefreshCw size={24} className="spin" style={{ marginBottom: '10px', color: 'var(--color-primary)' }} />
             <div>Entwurf wird vorbereitet, Versionen werden festgeschrieben...</div>
@@ -686,6 +719,14 @@ export default function AdminPanelView({
               />
             </div>
 
+            {modpackView === 'repository' && repositoryPanel}
+
+            {modpackView === 'changelog' && (
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px', paddingBottom: '14px' }}>
+                <ServerChangelog manifest={publishedManifest} isAdmin onRefreshManifest={onRefreshManifest} />
+              </div>
+            )}
+
             {modpackView === 'pipeline' && (
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px', paddingBottom: '14px' }}>
                 <ModpackPipeline
@@ -710,19 +751,17 @@ export default function AdminPanelView({
                   Keine BisectHosting-Zugangsdaten hinterlegt
                 </h2>
                 <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', maxWidth: '440px', margin: '0 auto 24px', lineHeight: 1.5 }}>
-                  Die Anmeldedaten für dein BisectHosting Starbase-Panel (Panel-URL &amp; API-Key) werden zentral in den Einstellungen konfiguriert.
+                  Trage Panel-URL und API-Key deines BisectHosting Starbase-Panels unter Modpack, Reiter „Server &amp; Repository“ ein.
                 </p>
-                {onOpenSettings && (
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    onClick={onOpenSettings}
-                    style={{ margin: '0 auto', padding: '10px 20px', gap: '8px' }}
-                  >
-                    <Settings size={16} />
-                    <span>In den Einstellungen hinterlegen</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={openCredentials}
+                  style={{ margin: '0 auto', padding: '10px 20px', gap: '8px' }}
+                >
+                  <Settings size={16} />
+                  <span>Zugangsdaten eintragen</span>
+                </button>
               </>
             ) : (
               <>
@@ -758,17 +797,15 @@ export default function AdminPanelView({
                     <RefreshCw size={16} className={isConnecting ? 'spin' : ''} />
                     <span>{isConnecting ? 'Verbinde...' : 'Erneut verbinden'}</span>
                   </button>
-                  {onOpenSettings && (
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      onClick={onOpenSettings}
-                      style={{ padding: '10px 18px', gap: '8px' }}
-                    >
-                      <Settings size={16} />
-                      <span>Zugangsdaten anpassen</span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={openCredentials}
+                    style={{ padding: '10px 18px', gap: '8px' }}
+                  >
+                    <Settings size={16} />
+                    <span>Zugangsdaten anpassen</span>
+                  </button>
                 </div>
               </>
             )}
@@ -835,7 +872,7 @@ export default function AdminPanelView({
                           {selectedServer?.attributes?.name || 'Minecraft Server'}
                         </h2>
                         <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-                          ID: {selectedServer?.attributes?.identifier} · IP: {resolveServerAddress(settings, manifest) || 'nicht festgelegt'}
+                          ID: {selectedServer?.attributes?.identifier} · IP: {getAdminServer(settings)?.address || resolveServerAddress(settings, manifest) || 'nicht festgelegt'}
                         </span>
                       </div>
                     </div>

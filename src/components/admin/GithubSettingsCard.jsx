@@ -128,7 +128,7 @@ export default function GithubSettingsCard() {
       {result && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '14px', fontSize: '13.5px', fontWeight: 600, color: result.success ? '#059669' : '#dc2626' }}>
           {result.success ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-          <span>{result.success ? 'Repo und Branch sind erreichbar.' : result.error}</span>
+          <span>{result.success ? (result.note || 'Repo und Branch sind erreichbar.') : result.error}</span>
         </div>
       )}
     </div>

@@ -8,6 +8,16 @@ export function getActiveServer(settings) {
   return getServers(settings).find(server => server.id === settings?.activeServerId) || null;
 }
 
+// Server des Server-Admins: eigene Einstellungen, unabhängig von der Spielliste
+export const ADMIN_SERVER_ID = '_admin';
+
+export function getAdminServer(settings) {
+  return {
+    id: ADMIN_SERVER_ID, name: '', address: '', owner: '', repo: '', branch: 'main', description: '', banner: '',
+    ...(settings?.adminServer || {})
+  };
+}
+
 // Adresse des aktiven Servers. Älter angelegte Einstellungen und die Modliste dienen als Rückfall.
 export function resolveServerAddress(settings, manifest) {
   const active = getActiveServer(settings)?.address;

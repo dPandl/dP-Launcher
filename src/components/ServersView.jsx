@@ -1,3 +1,4 @@
+import ServerBannerField from './common/ServerBannerField';
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Globe, Plus, FileDown, FileUp, Pencil, FolderOpen, Trash2, Check, X, Share2, FileText, ChevronDown } from 'lucide-react';
@@ -29,7 +30,7 @@ function Dialog({ title, icon: Icon, onClose, children, busy }) {
   );
 }
 
-const EMPTY_FORM = { name: '', address: '', github: '', branch: 'main', chatPort: '' };
+const EMPTY_FORM = { name: '', description: '', address: '', github: '', branch: 'main', chatPort: '' };
 
 // Reiter Server: die Startseite des gewählten Servers, oben mit der Auswahl aller Server
 export default function ServersView({ settings, isAdmin = false, onImportFile, playViewProps }) {
@@ -66,6 +67,7 @@ export default function ServersView({ settings, isAdmin = false, onImportFile, p
     id: server.id,
     values: {
       name: server.name,
+      description: server.description || '',
       address: server.address,
       github: server.owner && server.repo ? `${server.owner}/${server.repo}` : '',
       branch: server.branch || 'main',
@@ -106,7 +108,7 @@ export default function ServersView({ settings, isAdmin = false, onImportFile, p
     if (!hasApp) return showNotice('Das geht nur in der App.');
     setBusy(true);
     try {
-      const res = await window.electronAPI.exportServer(exportFor.server.id, exportFor.name);
+      const res = await window.electronAPI.exportServer(exportFor.server.id, exportFor.name, exportFor.description, exportFor.banner);
       if (res?.canceled) return;
       if (!res?.success) {
         failed(res);
@@ -162,7 +164,10 @@ export default function ServersView({ settings, isAdmin = false, onImportFile, p
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginLeft: 'auto' }}>
           {activeServer && (
             <>
-              <button type="button" className="btn-secondary" title="Als Datei teilen" onClick={() => setExportFor({ server: activeServer, name: activeServer.name })} style={{ padding: '8px 10px' }}>
+              <button type="button" className="btn-secondary" title="Als Datei teilen" onClick={async () => {
+                const banner = activeServer.banner && window.electronAPI?.readBanner ? await window.electronAPI.readBanner(activeServer.id) : '';
+                setExportFor({ server: activeServer, name: activeServer.name, description: activeServer.description || '', banner });
+              }} style={{ padding: '8px 10px' }}>
                 <Share2 size={15} />
               </button>
               <button type="button" className="btn-secondary" title="Server bearbeiten" onClick={() => openEdit(activeServer)} style={{ padding: '8px 10px' }}>
@@ -241,6 +246,13 @@ export default function ServersView({ settings, isAdmin = false, onImportFile, p
               <input type="text" value={form.values.name} onChange={(e) => setField('name', e.target.value)} maxLength={60} placeholder="z. B. Survival mit Freunden" style={{ width: '100%' }} />
             </div>
             <div>
+              <label style={{ ...labelStyle, display: 'flex', justifyContent: 'space-between' }}>
+                <span>Beschreibung (optional, wird unter dem Namen gezeigt)</span>
+                <span>{(form.values.description || '').length}/140</span>
+              </label>
+              <textarea value={form.values.description || ''} onChange={(e) => setField('description', e.target.value.replace(/\s+/g, ' '))} maxLength={140} rows={2} style={{ width: '100%', resize: 'none' }} />
+            </div>
+            <div>
               <label style={labelStyle}>Server-Adresse</label>
               <input type="text" value={form.values.address} onChange={(e) => setField('address', e.target.value)} placeholder="z. B. mc.beispiel.de:25565" style={{ width: '100%' }} />
             </div>
@@ -277,6 +289,14 @@ export default function ServersView({ settings, isAdmin = false, onImportFile, p
           </p>
           <label style={labelStyle}>Name in der Datei</label>
           <input type="text" value={exportFor.name} onChange={(e) => setExportFor(prev => ({ ...prev, name: e.target.value }))} maxLength={60} style={{ width: '100%' }} />
+          <label style={{ ...labelStyle, display: 'flex', justifyContent: 'space-between', marginTop: '14px' }}>
+            <span>Beschreibung (optional)</span>
+            <span>{(exportFor.description || '').length}/140</span>
+          </label>
+          <textarea value={exportFor.description || ''} onChange={(e) => setExportFor(prev => ({ ...prev, description: e.target.value.replace(/\s+/g, ' ') }))} maxLength={140} rows={2} style={{ width: '100%', resize: 'none' }} />
+          <div style={{ marginTop: '14px' }}>
+            <ServerBannerField value={exportFor.banner || ''} onPick={(dataUrl) => setExportFor(prev => ({ ...prev, banner: dataUrl }))} onRemove={() => setExportFor(prev => ({ ...prev, banner: '' }))} />
+          </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
             <button type="button" className="btn-secondary" onClick={() => setExportFor(null)} disabled={busy}>Abbrechen</button>
             <button type="button" className="btn-primary" onClick={submitExport} disabled={busy || !exportFor.name.trim()}>

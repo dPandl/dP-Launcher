@@ -2,11 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Save, Palette, Cpu, Link, Search, Check, MonitorCog, Moon, Sun, Monitor, Zap, Minimize2, EyeOff, LayoutTemplate,
-  ServerCog, Shield, Eye, RefreshCw, CheckCircle2, AlertCircle, HelpCircle, Server, Sparkles, Pipette, Calendar, Flower2, Leaf, CloudSnow, X
+  ServerCog, Server, Sparkles, Pipette, Calendar, Flower2, Leaf, CloudSnow, X
 } from 'lucide-react';
 import { SEASONS, applySeasonTheme } from '../services/seasonManager';
-import { BisectService } from '../services/bisectService';
-import GithubSettingsCard from './admin/GithubSettingsCard';
 import ThemeStudio from './common/ThemeStudio';
 import Fab from './common/Fab';
 
@@ -23,9 +21,6 @@ const THEME_ICONS = {
 export default function SettingsView({ settings, setSettings, onReloadManifest }) {
   const [formData, setFormData] = useState({ ...settings });
   const [saved, setSaved] = useState(false);
-  const [testingBisect, setTestingBisect] = useState(false);
-  const [bisectTestResult, setBisectTestResult] = useState(null);
-  const [showApiKey, setShowApiKey] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
 
   // Automatisch speichern, sobald die Einstellungsseite verlassen wird (nur bei Änderungen)
@@ -54,29 +49,6 @@ export default function SettingsView({ settings, setSettings, onReloadManifest }
       }));
     }
   }, [settings]);
-
-  const handleTestBisectConnection = async () => {
-    const panelUrl = formData.bisectConfig?.panelUrl || 'https://games.bisecthosting.com';
-    const apiKey = formData.bisectConfig?.apiKey || '';
-    if (!apiKey.trim()) {
-      setBisectTestResult({ success: false, error: 'Bitte gib zuerst einen Client API-Key ein.' });
-      return;
-    }
-    setTestingBisect(true);
-    setBisectTestResult(null);
-    try {
-      const servers = await BisectService.getServers(panelUrl, apiKey);
-      setBisectTestResult({
-        success: true,
-        count: servers.length,
-        servers: servers.map(s => s.attributes?.name || s.attributes?.identifier).filter(Boolean)
-      });
-    } catch (err) {
-      setBisectTestResult({ success: false, error: err.message || 'Verbindung fehlgeschlagen' });
-    } finally {
-      setTestingBisect(false);
-    }
-  };
 
   const handleToggleAdminMode = async (nextVal) => {
     setFormData(prev => ({ ...prev, enableAdminMode: nextVal }));
@@ -719,7 +691,7 @@ export default function SettingsView({ settings, setSettings, onReloadManifest }
             <div>
               <h2 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-main)', margin: 0 }}>Server-Administration</h2>
               <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
-                Admin-Bereich freischalten und BisectHosting Starbase-Panel verbinden.
+                Admin-Bereich freischalten. Die Einrichtung folgt im Server-Admin.
               </p>
             </div>
           </div>
@@ -770,134 +742,8 @@ export default function SettingsView({ settings, setSettings, onReloadManifest }
           Wenn aktiviert, wird der Tab <b>Server-Admin</b> in der Seitenleiste sichtbar. Normale Spieler sehen diesen Tab standardmäßig nicht.
         </p>
 
-        {formData.enableAdminMode && (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '14px',
-            padding: '16px',
-            borderRadius: '14px',
-            background: 'var(--bg-well)',
-            border: '1px solid var(--border-card)',
-            marginTop: '8px'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
-              <Shield size={16} style={{ color: 'var(--color-primary)' }} />
-              <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-main)' }}>
-                BisectHosting Starbase Anmeldedaten
-              </span>
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
-                Panel-URL:
-              </label>
-              <input
-                type="text"
-                value={formData.bisectConfig?.panelUrl || ''}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setFormData(prev => ({
-                    ...prev,
-                    bisectConfig: { ...(prev.bisectConfig || {}), panelUrl: val }
-                  }));
-                }}
-                placeholder="https://games.bisecthosting.com"
-                style={{ width: '100%' }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
-                Client API-Key:
-              </label>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <input
-                  type={showApiKey ? 'text' : 'password'}
-                  value={formData.bisectConfig?.apiKey || ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setFormData(prev => ({
-                      ...prev,
-                      bisectConfig: { ...(prev.bisectConfig || {}), apiKey: val }
-                    }));
-                  }}
-                  placeholder="ptlc_..."
-                  style={{ width: '100%', fontFamily: 'monospace', paddingRight: '42px' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowApiKey(prev => !prev)}
-                  title={showApiKey ? 'API-Key verbergen' : 'API-Key anzeigen'}
-                  style={{
-                    position: 'absolute',
-                    right: '10px',
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'var(--text-muted)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '4px'
-                  }}
-                >
-                  {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                <HelpCircle size={14} />
-                <span>
-                  Erstelle den Key in deinem Panel unter: <b>Account Settings &rarr; API Credentials</b>.
-                </span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={handleTestBisectConnection}
-                disabled={testingBisect}
-                style={{ padding: '8px 14px', fontSize: '12.5px' }}
-              >
-                <RefreshCw size={14} className={testingBisect ? 'spin' : ''} />
-                <span>{testingBisect ? 'Teste Verbindung...' : 'Verbindung testen'}</span>
-              </button>
-
-              {bisectTestResult && (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  fontSize: '12.5px',
-                  fontWeight: 600,
-                  color: bisectTestResult.success ? '#34d399' : '#f87171'
-                }}>
-                  {bisectTestResult.success ? (
-                    <>
-                      <CheckCircle2 size={15} />
-                      <span>
-                        Verbindung erfolgreich! {bisectTestResult.count} Server gefunden{bisectTestResult.servers?.length > 0 ? ` (${bisectTestResult.servers.join(', ')})` : ''}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <AlertCircle size={15} />
-                      <span>{bisectTestResult.error}</span>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Server-Modpack GitHub-Repository & Token (Admin) */}
-      {formData.enableAdminMode && (
-        <GithubSettingsCard />
-      )}
     </div>
   );
 }

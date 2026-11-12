@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Game & Directories
   getGameDir: () => ipcRenderer.invoke('get-game-dir'),
   openGameDir: (subDir) => ipcRenderer.invoke('open-game-dir', subDir),
+  openTestInstanceDir: () => ipcRenderer.invoke('open-test-instance-dir'),
   getInstalledItems: (category) => ipcRenderer.invoke('get-installed-items', category),
   deleteItem: (category, filename) => ipcRenderer.invoke('delete-item', { category, filename }),
   // Eigene Instanzen
@@ -48,8 +49,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateServer: (id, data) => ipcRenderer.invoke('servers-update', { id, data }),
   setActiveServer: (id) => ipcRenderer.invoke('servers-set-active', id),
   removeServer: (id, deleteFiles) => ipcRenderer.invoke('servers-remove', { id, deleteFiles }),
+  saveAdminServer: (data) => ipcRenderer.invoke('admin-server-save', data),
+  saveAdminPresentation: (data) => ipcRenderer.invoke('admin-presentation-save', data),
+  onAdminServerChanged: (callback) => {
+    const subscription = (event, adminServer) => callback(adminServer);
+    ipcRenderer.on('admin-server-changed', subscription);
+    return () => ipcRenderer.removeListener('admin-server-changed', subscription);
+  },
   openServerFolder: (id) => ipcRenderer.invoke('servers-open-folder', id),
-  exportServer: (id, name) => ipcRenderer.invoke('servers-export', { id, name }),
+  exportServer: (id, name, description, banner) => ipcRenderer.invoke('servers-export', { id, name, description, banner }),
+  pickServerBanner: () => ipcRenderer.invoke('server-banner-pick'),
+  readBanner: (ownerId) => ipcRenderer.invoke('banner-read', ownerId),
+  updateServerPresentation: (options) => ipcRenderer.invoke('modpack-update-presentation', options),
   pickServerFile: () => ipcRenderer.invoke('servers-import-pick'),
   takePendingServerFile: () => ipcRenderer.invoke('servers-take-pending-file'),
   onServersChanged: (callback) => {
@@ -103,6 +114,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getModpackDraft: () => ipcRenderer.invoke('modpack-get-draft'),
   saveModpackDraft: (draft) => ipcRenderer.invoke('modpack-save-draft', draft),
   fetchPublishedModpack: () => ipcRenderer.invoke('modpack-fetch-published'),
+  fetchPublishedModpackAdmin: () => ipcRenderer.invoke('modpack-fetch-published-admin'),
   updateServerChangelog: (options) => ipcRenderer.invoke('modpack-update-changelog', options),
   publishModpack: (options) => ipcRenderer.invoke('modpack-publish', options),
   getAvailableModpackConfigs: () => ipcRenderer.invoke('modpack-get-available-configs'),
@@ -114,6 +126,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const subscription = (event, line) => callback(line);
     ipcRenderer.on('modpack-server-log', subscription);
     return () => ipcRenderer.removeListener('modpack-server-log', subscription);
+  },
+  onModpackServerProgress: (callback) => {
+    const subscription = (event, progress) => callback(progress);
+    ipcRenderer.on('modpack-server-progress', subscription);
+    return () => ipcRenderer.removeListener('modpack-server-progress', subscription);
   },
   onModpackDraftUpdated: (callback) => {
     const subscription = (event, draft) => callback(draft);

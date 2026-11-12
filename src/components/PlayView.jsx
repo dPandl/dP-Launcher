@@ -1,3 +1,4 @@
+import ServerHeading from './common/ServerHeading';
 import React, { useState, useEffect } from 'react';
 import { Play, RefreshCw, CheckCircle2, AlertCircle, Server, Terminal, FolderOpen, ShieldCheck, LogIn, Copy, Check, Square, Package, X } from 'lucide-react';
 import { ModrinthService } from '../services/modrinthService';
@@ -199,7 +200,8 @@ export default function PlayView({ manifest, activeSeason, settings, account, on
       if (window.electronAPI) {
         const res = await window.electronAPI.launchGame({
           serverAddress: resolveServerAddress(settings, target),
-          serverName: target?.serverName,
+          // Name aus dem Manifest (GitHub) gilt vor dem Namen aus dem Launcher bzw. der Serverdatei
+          serverName: target?.serverName || activeServer?.name,
           gameVersion: getTargetGameVersion(target, serverPing),
           loader: target?.loader || 'fabric',
           loaderVersion: target?.loaderVersion || '0.16.9'
@@ -288,12 +290,7 @@ export default function PlayView({ manifest, activeSeason, settings, account, on
           <div className="badge badge-accent" style={{ marginBottom: '10px' }}>
             <ShieldCheck size={14} /> Aktiver Server
           </div>
-          <h1 className="app-page-title" style={{ fontSize: '26px', marginBottom: '6px' }}>
-            {activeServer?.name || manifest?.serverName || 'Minecraft Server'}
-          </h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '14px', maxWidth: '520px', lineHeight: 1.5 }}>
-            {activeSeason.tagline}. Alle benötigten Mods werden mit einem Klick direkt über Modrinth auf deinem PC synchronisiert.
-          </p>
+          <ServerHeading manifest={manifest} server={activeServer} />
         </div>
 
         <div>

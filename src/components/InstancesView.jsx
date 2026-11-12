@@ -5,6 +5,7 @@ import { getServers, getActiveServer } from '../utils/serverAddress';
 import { ModrinthService } from '../services/modrinthService';
 import { registerBackHandler } from '../utils/navigation';
 import Dropdown from './common/Dropdown';
+import { useServerBannerSrc } from './common/ServerHeading';
 import Dialog from './common/Dialog';
 import ModrinthBrowser from './modrinth/ModrinthBrowser';
 
@@ -227,6 +228,7 @@ function ModpackStore({ onBack, onInstalled }) {
 export default function InstancesView({ settings, onQuickStart, onOpenMods }) {
   const instances = Array.isArray(settings?.instances) ? settings.instances : [];
   const server = lastPlayedServer(settings);
+  const quickBannerSrc = useServerBannerSrc(server);
   const hasApp = Boolean(window.electronAPI);
 
   const [dialog, setDialog] = useState(null); // { type: 'create' | 'edit' | 'remove', ... }
@@ -380,6 +382,13 @@ export default function InstancesView({ settings, onQuickStart, onOpenMods }) {
 
       {/* Schnellstart zum zuletzt gespielten Server */}
       <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', padding: '18px 22px', background: 'linear-gradient(135deg, var(--bg-card), var(--bg-secondary))' }}>
+        {server && quickBannerSrc ? (
+          <>
+            <img src={quickBannerSrc} alt={server.name} style={{ display: 'block', width: 'min(360px, 100%)', aspectRatio: '3 / 1', objectFit: 'cover', borderRadius: '14px', flexShrink: 0 }} />
+            <div style={{ flex: '1 1 0', minWidth: 0 }} />
+          </>
+        ) : (
+          <>
         <div style={{ width: '46px', height: '46px', borderRadius: '14px', background: 'var(--color-primary-soft)', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <Zap size={22} />
         </div>
@@ -396,6 +405,8 @@ export default function InstancesView({ settings, onQuickStart, onOpenMods }) {
             <div style={{ fontSize: '13.5px', color: 'var(--text-muted)' }}>Noch kein Server. Lege im Reiter Server einen an oder importiere die Datei eines Freundes.</div>
           )}
         </div>
+          </>
+        )}
         {server && (
           <button type="button" className="btn-primary" onClick={() => onQuickStart(server.id)} disabled={gameBusy}>
             <Play size={16} fill="currentColor" />

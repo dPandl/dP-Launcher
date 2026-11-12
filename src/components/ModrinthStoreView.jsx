@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Check, ExternalLink, RefreshCw, Trash2, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Download, Check, ExternalLink, RefreshCw, Trash2, X, CheckCircle2, AlertCircle, ListChecks } from 'lucide-react';
 import { ModrinthService } from '../services/modrinthService';
 import ModrinthBrowser from './modrinth/ModrinthBrowser';
+import VersionPickDialog from './modrinth/VersionPickDialog';
 import { getProjectUrl, openExternal } from './modrinth/modrinthUi';
 import { getManifestMods } from '../../modpackUtils.js';
 
@@ -12,6 +13,7 @@ export default function ModrinthStoreView({ manifest, hideHeader = false, openRe
   const [installedKeys, setInstalledKeys] = useState({});
   const [userMods, setUserMods] = useState([]);
   const [notice, setNotice] = useState(null);
+  const [picker, setPicker] = useState(null); // { project, type }
 
   const gameVersion = manifest?.gameVersion || '26.3';
   const loader = manifest?.loader || 'fabric';
@@ -140,6 +142,23 @@ export default function ModrinthStoreView({ manifest, hideHeader = false, openRe
     );
   };
 
+  // Zweiter Knopf neben Installieren: eine bestimmte Version wählen, falls die neueste nicht funktioniert
+  const withVersionPicker = (project, type, button) => (
+    <div style={{ display: 'flex', gap: '6px' }}>
+      {button}
+      <button
+        type="button"
+        className="btn-secondary mr-action-button"
+        disabled={Boolean(busyKey)}
+        onClick={() => setPicker({ project, type })}
+        title="Andere Version wählen"
+        aria-label="Andere Version wählen"
+      >
+        <ListChecks size={13} />
+      </button>
+    </div>
+  );
+
   const renderAction = (project, type) => {
     if (!type.installDir) {
       return (
@@ -151,7 +170,7 @@ export default function ModrinthStoreView({ manifest, hideHeader = false, openRe
 
     if (type.id !== 'mod') {
       if (installedKeys[project.id]) return renderDoneButton('Installiert');
-      return renderInstallButton(project.id, () => handleInstallLatestFile(project, type), true);
+      return withVersionPicker(project, type, renderInstallButton(project.id, () => handleInstallLatestFile(project, type), true));
     }
 
     if (findPackMod(project)) return renderDoneButton('Im Modpack');
@@ -174,7 +193,7 @@ export default function ModrinthStoreView({ manifest, hideHeader = false, openRe
       );
     }
 
-    return renderInstallButton(project.id, () => handleInstallMod(project), true);
+    return withVersionPicker(project, type, renderInstallButton(project.id, () => handleInstallMod(project), true));
   };
 
   const renderVersionAction = (project, version, type) => {
@@ -218,6 +237,19 @@ export default function ModrinthStoreView({ manifest, hideHeader = false, openRe
             <X size={15} />
           </button>
         </div>
+      )}
+
+      {picker && (
+        <VersionPickDialog
+          project={picker.project}
+          gameVersion={gameVersion}
+          loader={loader}
+          title="Version installieren"
+          onClose={() => setPicker(null)}
+          onConfirm={(version) => (picker.type.id === 'mod'
+            ? handleInstallMod(picker.project, version.id)
+            : installFile(picker.project, version, picker.type, picker.project.id))}
+        />
       )}
 
       <ModrinthBrowser

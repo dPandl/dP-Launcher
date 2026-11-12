@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Plus, Check, RefreshCw, Pin, Server, CheckCircle2, AlertCircle, Filter, Ban, Laptop } from 'lucide-react';
+import { Plus, Check, RefreshCw, Pin, Server, CheckCircle2, AlertCircle, Filter, Laptop, ListChecks, AlertTriangle } from 'lucide-react';
 import ModrinthBrowser from '../modrinth/ModrinthBrowser';
+import VersionPickDialog from '../modrinth/VersionPickDialog';
 import { addModToDraft, updateModInDraft, deriveSide, addResourcepackToDraft, addShaderpackToDraft } from '../../services/modpackService';
 import { ModrinthService } from '../../services/modrinthService';
 import { BisectService } from '../../services/bisectService';
-import { appAlert } from '../../utils/appDialog';
+import { appAlert, appConfirm } from '../../utils/appDialog';
 
 // Kompletter Modrinth-Katalog für den Entwurf und direkte Server-Installationen
 export default function ModpackDiscover({
@@ -23,6 +24,7 @@ export default function ModpackDiscover({
   const [serverBusyKey, setServerBusyKey] = useState(null);
   const [serverNotice, setServerNotice] = useState(null);
   const [strictFilter, setStrictFilter] = useState(true);
+  const [picker, setPicker] = useState(null); // { project, mode: 'draft' | 'server' }
 
   const findInDraft = (project) => {
     if (!project) return null;
@@ -157,8 +159,13 @@ export default function ModpackDiscover({
     }
 
     if (serverSide === 'unsupported' || deriveSide(clientSide, serverSide) === 'client') {
-      appAlert(`"${project.title}" ist laut Modrinth eine reine Client-Mod (server_side: unsupported) und kann nicht auf dem Server installiert werden.`, { warning: true });
-      return;
+      const proceed = await appConfirm(
+        `"${project.title}" ist laut Modrinth eine reine Client-Mod (server_side: unsupported).\n\n` +
+        'Auf dem Server bringt sie meist nichts und kann den Serverstart verhindern, wenn sie Client-Code lädt. ' +
+        'Sie wird direkt in den /mods-Ordner geladen, ohne Entwurf und ohne Backup.',
+        { title: 'Client-Mod auf den Server laden?', confirmLabel: 'Trotzdem hochladen', cancelLabel: 'Abbrechen' }
+      );
+      if (!proceed) return;
     }
 
     const key = specificVersion ? specificVersion.id : project.id;
@@ -225,6 +232,35 @@ export default function ModpackDiscover({
     }
   };
 
+  // Knopf zum Wählen einer bestimmten Version, falls die neueste kaputt ist
+  const renderPickRow = (project, mode) => (
+    <button
+      type="button"
+      className="btn-secondary mr-action-button"
+      disabled={Boolean(busyKey) || Boolean(serverBusyKey)}
+      onClick={() => setPicker({ project, mode })}
+      title={mode === 'draft' ? 'Eine bestimmte Version für den Entwurf wählen' : 'Eine bestimmte Version auf den Server installieren'}
+      style={{ width: '100%', justifyContent: 'center' }}
+    >
+      <ListChecks size={13} />
+      <span>{mode === 'draft' ? 'Version wählen' : 'Version für Server'}</span>
+    </button>
+  );
+
+  // Gewählte Version in den Entwurf übernehmen oder auf den Server installieren
+  const applyPickedVersion = ({ project, mode }, version) => {
+    if (mode === 'server') return handleInstallToServer(project, version);
+    const existing = findInDraft(project);
+    const pType = project.project_type || 'mod';
+    if (pType === 'resourcepack' || pType === 'shader') {
+      const addFn = pType === 'resourcepack' ? addResourcepackToDraft : addShaderpackToDraft;
+      return runChange(version.id, () => addFn(draft, project, version.id));
+    }
+    return runChange(version.id, () => (existing
+      ? updateModInDraft(draft, existing.slug, { versionId: version.id })
+      : addModToDraft(draft, project, { versionId: version.id })));
+  };
+
   const renderAction = (project) => {
     const existing = findInDraft(project);
     const onServer = isModOnServer(project);
@@ -262,6 +298,7 @@ export default function ModpackDiscover({
               <span>Zum Entwurf</span>
             </button>
           )}
+          {!existing && renderPickRow(project, 'draft')}
         </div>
       );
     }
@@ -312,26 +349,26 @@ export default function ModpackDiscover({
             <span>{existing ? 'Als eigene Mod' : 'Zum Entwurf'}</span>
           </button>
         )}
+        {renderPickRow(project, 'draft')}
 
         {/* Button 2: Direkt auf Server (deaktiviert für reine Client-Mods) */}
         {isClientOnly ? (
           <button
             type="button"
             className="btn-secondary mr-action-button"
-            disabled
-            title="Diese Mod ist laut Modrinth eine reine Client-Mod (server_side: unsupported) und kann nicht auf dem Server installiert werden."
+            disabled={Boolean(busyKey) || Boolean(serverBusyKey)}
+            onClick={() => handleInstallToServer(project)}
+            title="Reine Client-Mod laut Modrinth. Nach einer Rückfrage lässt sie sich trotzdem auf den Server laden."
             style={{
               width: '100%',
               justifyContent: 'center',
-              opacity: 0.55,
-              cursor: 'not-allowed',
-              color: 'var(--text-muted)',
-              borderColor: 'var(--border-card)',
-              background: 'var(--bg-well)'
+              borderColor: '#f59e0b',
+              color: '#d97706',
+              background: 'rgba(245, 158, 11, 0.10)'
             }}
           >
-            <Ban size={13} style={{ color: '#94a3b8' }} />
-            <span>Nur Client</span>
+            {isServerBusy ? <RefreshCw size={13} className="spin" /> : <AlertTriangle size={13} />}
+            <span>{isServerBusy ? 'Wird übertragen...' : 'Client-Mod auf Server'}</span>
           </button>
         ) : (
           <button
@@ -366,6 +403,7 @@ export default function ModpackDiscover({
             </span>
           </button>
         )}
+        {renderPickRow(project, 'server')}
       </div>
     );
   };
@@ -427,12 +465,13 @@ export default function ModpackDiscover({
           <button
             type="button"
             className="btn-secondary mr-action-button"
-            disabled
-            title="Reine Client-Mod: Kann nicht auf dem Server installiert werden."
-            style={{ opacity: 0.55, cursor: 'not-allowed', color: 'var(--text-muted)', background: 'var(--bg-well)' }}
+            disabled={Boolean(busyKey) || Boolean(serverBusyKey)}
+            onClick={() => handleInstallToServer(project, version)}
+            title="Reine Client-Mod laut Modrinth. Nach einer Rückfrage lässt sie sich trotzdem auf den Server laden."
+            style={{ borderColor: '#f59e0b', color: '#d97706', background: 'rgba(245, 158, 11, 0.10)' }}
           >
-            <Ban size={13} style={{ color: '#94a3b8' }} />
-            <span>Nur Client</span>
+            {isServerBusy ? <RefreshCw size={13} className="spin" /> : <AlertTriangle size={13} />}
+            <span>{isServerBusy ? 'Wird übertragen...' : 'Client-Mod auf Server'}</span>
           </button>
         ) : (
           <button
@@ -505,6 +544,20 @@ export default function ModpackDiscover({
           <span>Nur Minecraft {draft.gameVersion} ({draft.loader})</span>
         </label>
       </div>
+
+      {picker && (
+        <VersionPickDialog
+          project={picker.project}
+          gameVersion={draft.gameVersion}
+          loader={draft.loader}
+          title={picker.mode === 'draft' ? 'Version für den Entwurf' : 'Version auf den Server installieren'}
+          confirmLabel={picker.mode === 'draft' ? 'In den Entwurf' : 'Auf Server installieren'}
+          confirmIcon={picker.mode === 'draft' ? Pin : Server}
+          currentVersionId={picker.mode === 'draft' ? findInDraft(picker.project)?.versionId : null}
+          onClose={() => setPicker(null)}
+          onConfirm={(version) => applyPickedVersion(picker, version)}
+        />
+      )}
 
       <ModrinthBrowser
         projectTypes={['mod', 'resourcepack', 'shader']}

@@ -15,6 +15,7 @@ import ChangelogModal from './components/ChangelogModal';
 import UpdateModal from './components/UpdateModal';
 import SeasonalEffects from './components/effects/SeasonalEffects';
 import { applySeasonTheme, getActiveSeasonConfig, getCurrentSeason, subscribeSystemTheme } from './services/seasonManager';
+import { getAdminServer, getActiveServer } from './utils/serverAddress';
 import { releaseNotes } from './releaseNotes';
 
 // Fallback Manifest falls noch kein Server existiert
@@ -68,6 +69,9 @@ export default function App() {
   const [modsInstanceId, setModsInstanceId] = useState(null);
   const [manifestReady, setManifestReady] = useState(!window.electronAPI);
   const [draft, setDraft] = useState(null);
+  // Modliste und Entwurf des Admin-Servers, unabhängig vom Server der Spielliste
+  const [adminManifest, setAdminManifest] = useState(defaultLocalManifest);
+  const [adminReady, setAdminReady] = useState(!window.electronAPI);
   const [activeSeason, setActiveSeason] = useState(getActiveSeasonConfig(initialSeason));
   const [updateInfo, setUpdateInfo] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -127,8 +131,48 @@ export default function App() {
     setDraft(nextDraft);
   };
 
+  const adminSharesRepoWithPlay = () => {
+    const admin = getAdminServer(settings);
+    const play = getActiveServer(settings);
+    return Boolean(admin.owner && admin.repo && play
+      && play.owner === admin.owner && play.repo === admin.repo && (play.branch || 'main') === (admin.branch || 'main'));
+  };
+
+  // Modliste und Entwurf des Admin-Servers laden. Der Entwurf wird erst gebaut, wenn beides da ist.
+  const loadAdminData = async () => {
+    if (!window.electronAPI) return;
+    setAdminReady(false);
+    setDraft(null);
+    try {
+      const [result, savedDraft] = await Promise.all([
+        window.electronAPI.fetchPublishedModpackAdmin(),
+        window.electronAPI.getModpackDraft()
+      ]);
+      setAdminManifest(result?.manifest || defaultLocalManifest);
+      setDraft(savedDraft || null);
+    } catch (err) {
+      console.warn('Admin-Daten konnten nicht geladen werden:', err);
+    }
+    setAdminReady(true);
+  };
+
+  const refreshAdminManifest = async () => {
+    let latest = null;
+    try {
+      const result = await window.electronAPI.fetchPublishedModpackAdmin();
+      latest = result?.manifest || null;
+      if (latest) setAdminManifest(latest);
+    } catch (err) {
+      console.warn('Modliste des Admin-Servers konnte nicht geladen werden:', err);
+    }
+    // Liegt das Modpack im selben Repository wie der Spiel-Server, bleibt die Spielansicht aktuell
+    if (adminSharesRepoWithPlay()) refreshManifest();
+    return latest;
+  };
+
   const handlePublished = ({ manifest: published, draft: updatedDraft }) => {
-    setPublishedManifest(published);
+    setAdminManifest(published);
+    if (adminSharesRepoWithPlay()) setPublishedManifest(published);
     setDraft(updatedDraft);
   };
 
@@ -140,9 +184,7 @@ export default function App() {
   // Veröffentlichte Modliste beim Start und danach alle 5 Minuten abfragen
   useEffect(() => {
     if (!window.electronAPI) return undefined;
-    window.electronAPI.getModpackDraft().then(savedDraft => {
-      if (savedDraft) setDraft(savedDraft);
-    });
+    loadAdminData();
     const unsubDraft = window.electronAPI.onModpackDraftUpdated?.((newDraft) => {
       if (newDraft) setDraft(newDraft);
     });
@@ -159,11 +201,18 @@ export default function App() {
     if (!window.electronAPI?.onServersChanged) return undefined;
     return window.electronAPI.onServersChanged(async () => {
       const list = await window.electronAPI.listServers();
-      setSettings(prev => ({ ...prev, servers: list.servers, activeServerId: list.activeServerId }));
+      setSettings(prev => ({ ...prev, servers: list.servers, activeServerId: list.activeServerId, adminServer: list.adminServer }));
       setPublishedManifest(defaultLocalManifest);
-      setDraft(null);
       refreshManifest();
-      window.electronAPI.getModpackDraft().then(savedDraft => setDraft(savedDraft || null));
+      loadAdminData();
+    });
+  }, []);
+
+  // Name, Adresse oder Beschreibung des Admin-Servers geändert
+  useEffect(() => {
+    if (!window.electronAPI?.onAdminServerChanged) return undefined;
+    return window.electronAPI.onAdminServerChanged((adminServer) => {
+      setSettings(prev => ({ ...prev, adminServer }));
     });
   }, []);
 
@@ -367,14 +416,14 @@ export default function App() {
               {currentTab === 'admin' && isAdmin && (
                 <AdminPanelView
                   settings={settings}
-                  manifest={manifest}
-                  publishedManifest={publishedManifest}
-                  manifestReady={manifestReady}
+                  manifest={adminManifest}
+                  publishedManifest={adminManifest}
+                  manifestReady={adminReady}
                   draft={draft}
                   onUpdateSettings={setSettings}
                   onDraftChange={handleDraftChange}
                   onPublished={handlePublished}
-                  onOpenSettings={() => handleTabChange('settings')}
+                  onRefreshManifest={refreshAdminManifest}
                 />
               )}
 

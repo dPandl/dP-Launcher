@@ -5,6 +5,7 @@ import https from 'https';
 import http from 'http';
 import os from 'os';
 import crypto from 'crypto';
+import { AsyncLocalStorage } from 'async_hooks';
 import { execFile, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -16,6 +17,15 @@ import { unzipSync, strFromU8 } from 'fflate';
 import {
   SERVER_FILE_EXTENSION,
   sanitizeServerInput,
+  BANNER_MAX_BYTES,
+  SERVER_NAME_MAX,
+  SERVER_DESCRIPTION_MAX,
+  isValidServerAddress,
+  SERVER_FILE_MAX_CHARS,
+  isPngBuffer,
+  bannerToDataUrl,
+  bannerFromDataUrl,
+  isValidBannerDataUrl,
   createServerRecord,
   folderNameFor,
   buildServerFile,
@@ -57,6 +67,7 @@ import {
   INITIAL_MODPACK_VERSION,
   bumpVersion,
   compareVersions,
+  isValidCustomVersion,
   getManifestMods,
   getModSha1,
   isAllowedModUrl,
@@ -99,6 +110,7 @@ const defaultSettings = {
   manifestUrl: '',
   servers: undefined, // Liste der angelegten Server (wird beim ersten Start angelegt)
   activeServerId: null,
+  adminServer: undefined, // Server des Server-Admins: Name, Adresse, Repository. Unabhängig von der Spielliste.
   instances: undefined, // eigene Instanzen ohne Server
   serverIp: '', // veraltet: früher die Adresse des einen Servers
   autoSyncOnStart: true,
@@ -189,10 +201,61 @@ function getServers() {
   return Array.isArray(list) ? list : [];
 }
 
+// Das Server-Admin hat einen eigenen Server (Einstellung adminServer), unabhängig von der Spielliste.
+// Admin-Aufrufe laufen in diesem Kontext, dort liefert getActiveServer() den Admin-Server.
+const ADMIN_SERVER_ID = '_admin';
+const adminContext = new AsyncLocalStorage();
+
+function storedAdminServer() {
+  return {
+    name: '', address: '', owner: '', repo: '', branch: 'main', description: '', banner: '',
+    ...(getSettings().adminServer || {})
+  };
+}
+
+function getAdminServer() {
+  return { id: ADMIN_SERVER_ID, folder: ADMIN_SERVER_ID, ...storedAdminServer() };
+}
+
 function getActiveServer() {
+  if (adminContext.getStore()) return getAdminServer();
   const settings = getSettings();
   return getServers().find(server => server.id === settings.activeServerId) || null;
 }
+
+// Wie ipcMain.handle, aber der Aufruf gilt für den Admin-Server
+function handleAdmin(channel, handler) {
+  ipcMain.handle(channel, (event, ...args) => adminContext.run({}, () => handler(event, ...args)));
+}
+
+// ─── Banner als Dateien ─────────────────────────────────────────────────────
+// Banner liegen als PNG im Ordner "banners". In den Einstellungen steht nur ein kurzer Hash.
+// So bleibt die Einstellungsdatei klein, auch bei Bildern in Full HD.
+function bannerFilePath(ownerId) {
+  return path.join(app.getPath('userData'), 'banners', `${String(ownerId).replace(/[^A-Za-z0-9_-]/g, '_')}.png`);
+}
+
+function writeBannerFile(ownerId, dataUrl) {
+  const buffer = bannerFromDataUrl(dataUrl);
+  fs.mkdirSync(path.dirname(bannerFilePath(ownerId)), { recursive: true });
+  fs.writeFileSync(bannerFilePath(ownerId), buffer);
+  return crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 8);
+}
+
+function readBannerDataUrl(ownerId) {
+  try {
+    const file = bannerFilePath(ownerId);
+    return fs.existsSync(file) ? bannerToDataUrl(fs.readFileSync(file)) : '';
+  } catch (_e) {
+    return '';
+  }
+}
+
+function deleteBannerFile(ownerId) {
+  try { fs.rmSync(bannerFilePath(ownerId), { force: true }); } catch (_e) { /* nichts zu löschen */ }
+}
+
+ipcMain.handle('banner-read', (event, ownerId) => readBannerDataUrl(ownerId));
 
 function getInstanceDir(server = getActiveServer()) {
   return path.join(gameDir, 'instances', server ? server.folder : NO_SERVER_INSTANCE);
@@ -226,6 +289,52 @@ function saveServers(servers, activeServerId) {
 }
 
 // Frühere Versionen kannten nur einen Server. Dessen Einstellungen und Dateien werden einmalig übernommen.
+// Das Server-Admin hatte früher keinen eigenen Server, sondern nutzte den aktiven. Dessen Angaben und Daten werden einmalig übernommen.
+function migrateAdminServer() {
+  try {
+    const settings = getSettings();
+    if (settings.adminServer) return;
+    const source = getServers().find(server => server.id === settings.activeServerId && server.owner && server.repo);
+    if (!source) return;
+    saveSettings({
+      adminServer: {
+        name: source.name || '', address: source.address || '', owner: source.owner, repo: source.repo,
+        branch: source.branch || 'main', description: source.description || '', banner: source.banner || ''
+      }
+    });
+    // Liegt das Banner des Servers schon als Datei vor, bekommt es auch der Admin-Server
+    if (source.banner && !isValidBannerDataUrl(source.banner)) {
+      try { fs.copyFileSync(bannerFilePath(source.id), bannerFilePath(ADMIN_SERVER_ID)); } catch (_e) { /* ohne Banner weiter */ }
+    }
+    const from = path.join(app.getPath('userData'), 'servers', source.id);
+    const to = path.join(app.getPath('userData'), 'servers', ADMIN_SERVER_ID);
+    if (fs.existsSync(from) && !fs.existsSync(to)) fs.cpSync(from, to, { recursive: true });
+  } catch (err) {
+    console.warn('Admin-Server konnte nicht übernommen werden:', err.message);
+  }
+}
+
+function migrateBannersToFiles() {
+  try {
+    const settings = getSettings();
+    const patch = {};
+    let serversChanged = false;
+    const servers = getServers().map(server => {
+      if (!isValidBannerDataUrl(server.banner)) return server;
+      serversChanged = true;
+      return { ...server, banner: writeBannerFile(server.id, server.banner) };
+    });
+    if (serversChanged) patch.servers = servers;
+    const admin = settings.adminServer;
+    if (admin && isValidBannerDataUrl(admin.banner)) {
+      patch.adminServer = { ...admin, banner: writeBannerFile(ADMIN_SERVER_ID, admin.banner) };
+    }
+    if (Object.keys(patch).length > 0) saveSettings(patch);
+  } catch (err) {
+    console.warn('Banner konnten nicht in Dateien umgewandelt werden:', err.message);
+  }
+}
+
 function migrateLegacySetup() {
   try {
     const stored = readJsonFile(settingsPath, {}) || {};
@@ -482,6 +591,8 @@ app.on('open-file', (event, filePath) => {
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return;
   migrateLegacySetup();
+  migrateAdminServer();
+  migrateBannersToFiles();
   if (!Array.isArray(getSettings().instances)) saveInstances([]);
   ensureInstanceFolders();
   const startFile = findServerFileArg(process.argv);
@@ -753,6 +864,14 @@ ipcMain.handle('open-game-dir', async (event, subDir = '') => {
     fs.mkdirSync(target, { recursive: true });
   }
   await shell.openPath(target);
+});
+
+// Ordner der Testinstanz (Entwurf lokal testen). Er liegt unter dem Spielverzeichnis, nicht im Ordner eines Servers.
+ipcMain.handle('open-test-instance-dir', async () => {
+  const target = path.join(gameDir, testInstanceSubDir);
+  fs.mkdirSync(target, { recursive: true });
+  const error = await shell.openPath(target);
+  return error ? { success: false, error } : { success: true, path: target };
 });
 
 // ─── Local Config Files (Spieler Config-Editor) ──────────────────────────────
@@ -1071,7 +1190,7 @@ function toRendererSettings(settings) {
 ipcMain.handle('get-settings', () => toRendererSettings(getSettings()));
 
 ipcMain.handle('save-settings', (event, newSettings) => {
-  const { githubConfig, servers, activeServerId, instances, ...allowedSettings } = newSettings || {};
+  const { githubConfig, servers, activeServerId, adminServer, instances, ...allowedSettings } = newSettings || {};
   return toRendererSettings(saveSettings(allowedSettings));
 });
 
@@ -1350,7 +1469,7 @@ function resolveManifestTarget(userInput, fallbackConfig) {
 }
 
 // GitHub-API (immer aktuell) → Rohdatei (bis ca. 5 Minuten Cache) → lokaler Cache → mitgelieferte Datei
-ipcMain.handle('modpack-fetch-published', async () => {
+async function fetchPublishedModpack() {
   const settings = getSettings();
   const { owner, repo, branch } = getGithubConfig();
   const customUrl = (settings.manifestUrl || '').trim();
@@ -1391,11 +1510,14 @@ ipcMain.handle('modpack-fetch-published', async () => {
 
   if (isValidManifest(cached)) return { manifest: cached, source: 'cache' };
   return { manifest: getBundledManifest(), source: 'bundled' };
-});
+}
 
-ipcMain.handle('modpack-get-draft', () => readJsonFile(modpackDraftPath()));
+ipcMain.handle('modpack-fetch-published', () => fetchPublishedModpack());
+handleAdmin('modpack-fetch-published-admin', () => fetchPublishedModpack());
 
-ipcMain.handle('modpack-save-draft', (event, draft) => {
+handleAdmin('modpack-get-draft', () => readJsonFile(modpackDraftPath()));
+
+handleAdmin('modpack-save-draft', (event, draft) => {
   try {
     if (!isValidManifest(draft)) throw new Error('Ungültiger Entwurf');
     writeJsonFile(modpackDraftPath(), draft);
@@ -1429,22 +1551,7 @@ function isModOnServer(files, mod) {
   return Boolean(file) && (!mod.size || file.size === mod.size);
 }
 
-// Pterodactyl lädt per files/pull im Hintergrund, daher wird auf die fertigen Dateien gewartet
-async function waitForServerMods(serverId, mods, timeoutMs = 90000) {
-  const deadline = Date.now() + timeoutMs;
-  let pending = mods;
-  while (pending.length > 0 && Date.now() < deadline) {
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    const files = await listServerMods(serverId);
-    pending = pending.filter(mod => !isModOnServer(files, mod));
-  }
-  return pending;
-}
-
-// Pterodactyl erlaubt höchstens drei gleichzeitige Downloads pro Server
-const SERVER_PULL_BATCH_SIZE = 3;
-
-ipcMain.handle('modpack-apply-server', async (event, { dryRun = false, target = 'draft' } = {}) => {
+handleAdmin('modpack-apply-server', async (event, { dryRun = false, target = 'draft' } = {}) => {
   try {
     const published = readJsonFile(manifestCachePath()) || getBundledManifest();
     let sourceMods;
@@ -1505,51 +1612,124 @@ ipcMain.handle('modpack-apply-server', async (event, { dryRun = false, target = 
       }
     }
 
-    for (let i = 0; i < plan.upload.length; i += SERVER_PULL_BATCH_SIZE) {
-      const batch = plan.upload.slice(i, i + SERVER_PULL_BATCH_SIZE);
-      const started = [];
-
-      for (const mod of batch) {
-        addLog(`⬆ ${mod.filename} wird hochgeladen...`);
-        if (mod.replace) {
-          const del = await deleteServerMod(serverId, mod.filename);
-          if (!del.success) {
-            failed.push(mod.filename);
-            addLog(`✖ ${mod.filename}: Alte Datei konnte nicht ersetzt werden (${del.error})`);
-            continue;
-          }
-        }
-        const res = await bisectRequest({
-          method: 'POST',
-          endpoint: `/api/client/servers/${serverId}/files/pull`,
-          body: { url: mod.downloadUrl, directory: 'mods', filename: mod.filename }
-        });
-        if (res.success) {
-          started.push(mod);
-        } else {
-          failed.push(mod.filename);
-          addLog(`✖ ${mod.filename}: ${res.error}`);
-        }
+    // Viele Mods in wenigen Anfragen: erst lokal laden, dann gebündelt hochladen.
+    // Das Panel begrenzt Anfragen, ein Paket kostet nur eine Panel-Anfrage statt einer pro Mod.
+    const onPanelWait = (seconds) => addLog(`⏳ Das Panel bremst gerade, weiter in ${seconds} s...`);
+    // Fortschrittsbalken in der Oberfläche: Herunterladen ist die erste, Hochladen die zweite Hälfte
+    const sendProgress = (stage, label, percent) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('modpack-server-progress', { stage, label, percent: Math.max(0, Math.min(100, Math.round(percent))) });
       }
+    };
 
-      const pending = await waitForServerMods(serverId, started);
-      for (const mod of started) {
-        if (pending.includes(mod)) {
-          failed.push(mod.filename);
-          addLog(`✖ ${mod.filename}: Datei ist nach 90 Sekunden nicht vollständig auf dem Server angekommen`);
-        } else {
-          addLog(`✔ ${mod.filename} ist auf dem Server`);
+    if (plan.upload.length > 0) {
+      const replaced = plan.upload.filter(mod => mod.replace).map(mod => mod.filename);
+      if (replaced.length > 0) {
+        const del = await deleteServerMods(serverId, replaced, onPanelWait);
+        if (!del.success) {
+          addLog(`✖ Alte Dateien konnten nicht ersetzt werden (${del.error})`);
+          replaced.forEach(name => failed.push(name));
+          plan.upload = plan.upload.filter(mod => !mod.replace);
         }
       }
     }
 
-    for (const filename of plan.remove) {
-      const res = await deleteServerMod(serverId, filename);
-      if (res.success) {
-        addLog(`🗑 ${filename} gelöscht`);
+    if (plan.upload.length > 0) {
+      const cacheDir = path.join(app.getPath('userData'), 'server-upload-cache');
+      fs.mkdirSync(cacheDir, { recursive: true });
+
+      addLog(`⬇ Lade ${plan.upload.length} Mod(s) lokal herunter...`);
+      const ready = [];
+      let nextIndex = 0;
+      let doneCount = 0;
+      const worker = async () => {
+        while (nextIndex < plan.upload.length) {
+          const mod = plan.upload[nextIndex++];
+          const localPath = path.join(cacheDir, mod.filename);
+          try {
+            const cachedOk = fs.existsSync(localPath) && (!mod.sha1 || (await getFileSha1(localPath))?.toLowerCase() === mod.sha1.toLowerCase());
+            if (!cachedOk) await downloadVerified(mod.downloadUrl, localPath, mod.sha1);
+            ready.push({ mod, localPath, size: fs.statSync(localPath).size });
+          } catch (err) {
+            failed.push(mod.filename);
+            addLog(`✖ ${mod.filename}: Download fehlgeschlagen (${err.message})`);
+          }
+          doneCount++;
+          sendProgress('download', `Mods werden lokal geladen (${doneCount}/${plan.upload.length})`, (doneCount / plan.upload.length) * 50);
+          if (doneCount % 10 === 0 || doneCount === plan.upload.length) addLog(`⬇ ${doneCount}/${plan.upload.length} geladen`);
+        }
+      };
+      await Promise.all(Array.from({ length: 4 }, worker));
+
+      // Pakete bilden: höchstens 40 Dateien und etwa 60 MB je Upload
+      const MAX_FILES = 40;
+      const MAX_BYTES = 60 * 1024 * 1024;
+      const packages = [];
+      let current = [];
+      let currentBytes = 0;
+      for (const item of ready) {
+        if (current.length > 0 && (current.length >= MAX_FILES || currentBytes + item.size > MAX_BYTES)) {
+          packages.push(current);
+          current = [];
+          currentBytes = 0;
+        }
+        current.push(item);
+        currentBytes += item.size;
+      }
+      if (current.length > 0) packages.push(current);
+
+      let uploadedCount = 0;
+      for (let p = 0; p < packages.length; p++) {
+        const pkg = packages[p];
+        sendProgress('upload', `Paket ${p + 1}/${packages.length} wird hochgeladen (${uploadedCount}/${ready.length} Mods)`, 50 + (uploadedCount / ready.length) * 50);
+        const mb = (pkg.reduce((sum, item) => sum + item.size, 0) / (1024 * 1024)).toFixed(1);
+        addLog(`⬆ Paket ${p + 1}/${packages.length} (${pkg.length} Mod(s), ${mb} MB) wird hochgeladen...`);
+
+        let uploaded = false;
+        let lastError = '';
+        for (let attempt = 1; attempt <= 2 && !uploaded; attempt++) {
+          try {
+            const files = pkg.map(item => ({ name: item.mod.filename, data: fs.readFileSync(item.localPath) }));
+            const res = await uploadFilesToBisect(files, serverId, 'mods', null, onPanelWait);
+            if (!res.success) throw new Error(res.error);
+            uploaded = true;
+          } catch (err) {
+            lastError = err.message;
+            if (attempt < 2) addLog(`⚠ Paket ${p + 1} wird nochmal versucht (${err.message})`);
+          }
+        }
+
+        if (!uploaded) {
+          pkg.forEach(item => {
+            failed.push(item.mod.filename);
+            addLog(`✖ ${item.mod.filename}: ${lastError}`);
+          });
+          continue;
+        }
+
+        // Prüfen, was wirklich auf dem Server angekommen ist
+        const onServer = await listServerMods(serverId);
+        for (const item of pkg) {
+          if (isModOnServer(onServer, item.mod)) {
+            addLog(`✔ ${item.mod.filename} ist auf dem Server`);
+            fs.rmSync(item.localPath, { force: true });
+            uploadedCount++;
+          } else {
+            failed.push(item.mod.filename);
+            addLog(`✖ ${item.mod.filename}: Datei ist nach dem Upload nicht vollständig auf dem Server`);
+          }
+        }
+        sendProgress('upload', `Paket ${p + 1}/${packages.length} fertig (${uploadedCount}/${ready.length} Mods)`, 50 + (uploadedCount / ready.length) * 50);
+      }
+    }
+
+    if (plan.remove.length > 0) {
+      const removed = await deleteServerMods(serverId, plan.remove, onPanelWait);
+      if (removed.success) {
+        plan.remove.forEach(filename => addLog(`🗑 ${filename} gelöscht`));
       } else {
-        failed.push(filename);
-        addLog(`✖ ${filename}: ${res.error}`);
+        plan.remove.forEach(filename => failed.push(filename));
+        addLog(`✖ Löschen fehlgeschlagen: ${removed.error}`);
       }
     }
 
@@ -1569,6 +1749,15 @@ ipcMain.handle('modpack-apply-server', async (event, { dryRun = false, target = 
     return { success: false, error: err.message, log: [] };
   }
 });
+
+function deleteServerMods(serverId, filenames, onWait = null) {
+  return bisectRequest({
+    method: 'POST',
+    endpoint: `/api/client/servers/${serverId}/files/delete`,
+    body: { root: 'mods', files: filenames },
+    onWait
+  });
+}
 
 function deleteServerMod(serverId, filename) {
   return bisectRequest({
@@ -1654,7 +1843,7 @@ async function backupServerMods(serverId, addLog = () => {}) {
   return state;
 }
 
-ipcMain.handle('modpack-get-server-backup-info', () => {
+handleAdmin('modpack-get-server-backup-info', () => {
   const state = readJsonFile(serverTestBackupStatePath(), null);
   if (state && state.active) {
     return {
@@ -1668,7 +1857,7 @@ ipcMain.handle('modpack-get-server-backup-info', () => {
   return { active: false };
 });
 
-ipcMain.handle('modpack-restore-server-backup', async () => {
+handleAdmin('modpack-restore-server-backup', async () => {
   try {
     const state = readJsonFile(serverTestBackupStatePath(), null);
     if (!state || !state.active || !state.serverId) {
@@ -1763,13 +1952,13 @@ function describeGithubError(res, { owner, repo, branch }) {
   return res.data?.message || `GitHub antwortet mit HTTP ${res.status}.`;
 }
 
-ipcMain.handle('github-get-config', () => {
+handleAdmin('github-get-config', () => {
   const { token, ...config } = getGithubConfig();
   return { ...config, hasToken: Boolean(token) };
 });
 
 // Ohne Token-Feld bleibt das gespeicherte Token erhalten
-ipcMain.handle('github-save-config', (event, { owner, repo, branch, token }) => {
+handleAdmin('github-save-config', (event, { owner, repo, branch, token }) => {
   const current = getGithubConfig();
   const githubConfig = {
     owner: (owner || current.owner).trim(),
@@ -1777,34 +1966,48 @@ ipcMain.handle('github-save-config', (event, { owner, repo, branch, token }) => 
     branch: (branch || current.branch).trim(),
     token: token === undefined ? current.token : token.trim()
   };
-  // Das Token gilt für alle Server, Repository und Branch gehören zum aktiven Server
-  const activeServer = getActiveServer();
-  if (activeServer) {
-    saveServers(
-      getServers().map(server => (server.id === activeServer.id
-        ? { ...server, owner: githubConfig.owner, repo: githubConfig.repo, branch: githubConfig.branch }
-        : server)),
-      activeServer.id
-    );
-  }
-  saveSettings({ githubConfig: { token: githubConfig.token } });
+  // Das Token gilt für alle Server, Repository und Branch gehören zum Admin-Server
+  const admin = storedAdminServer();
+  const repoChanged = githubConfig.owner !== admin.owner || githubConfig.repo !== admin.repo || githubConfig.branch !== admin.branch;
+  saveSettings({
+    githubConfig: { token: githubConfig.token },
+    ...(repoChanged ? { adminServer: { ...admin, owner: githubConfig.owner, repo: githubConfig.repo, branch: githubConfig.branch } } : {})
+  });
+  if (repoChanged) notifyServersChanged();
   const { token: savedToken, ...config } = githubConfig;
   return { ...config, hasToken: Boolean(savedToken) };
 });
 
-ipcMain.handle('github-test-connection', async () => {
+// Ein leeres Repository hat noch keinen Branch. GitHub antwortet auf die Commit-Liste dann mit 409.
+async function isGithubRepoEmpty(config) {
+  const res = await githubRequest(`/repos/${config.owner}/${config.repo}/commits?per_page=1`);
+  return res.status === 409;
+}
+
+handleAdmin('github-test-connection', async () => {
   const config = getGithubConfig();
   if (!config.token) return { success: false, error: 'Es ist noch kein GitHub-Token hinterlegt.' };
   try {
     const res = await githubRequest(`/repos/${config.owner}/${config.repo}/branches/${encodeURIComponent(config.branch)}`);
-    if (!res.ok) return { success: false, error: describeGithubError(res, config) };
-    return { success: true };
+    if (res.ok) return { success: true };
+
+    // Repo ist da, aber leer: Der Branch entsteht mit der ersten Veröffentlichung
+    if (res.status === 404) {
+      const repoRes = await githubRequest(`/repos/${config.owner}/${config.repo}`);
+      if (repoRes.ok && repoRes.data?.permissions?.push === false) {
+        return { success: false, error: 'Das GitHub-Token darf in dieses Repo nicht schreiben (benötigt: Contents Read and write).' };
+      }
+      if (repoRes.ok && await isGithubRepoEmpty(config)) {
+        return { success: true, note: 'Das Repository ist noch leer. Der Branch wird bei der ersten Veröffentlichung angelegt.' };
+      }
+    }
+    return { success: false, error: describeGithubError(res, config) };
   } catch (err) {
     return { success: false, error: err.message };
   }
 });
 
-ipcMain.handle('modpack-get-available-configs', async () => {
+handleAdmin('modpack-get-available-configs', async () => {
   try {
     const candidateBases = [
       path.join(gameDir, testInstanceSubDir),
@@ -1930,7 +2133,7 @@ ipcMain.handle('modpack-get-available-configs', async () => {
   }
 });
 
-ipcMain.handle('modpack-publish', async (event, { bumpType = 'patch', changelog = '', title = '', selectedConfigFiles = null } = {}) => {
+handleAdmin('modpack-publish', async (event, { bumpType = 'patch', customVersion = '', changelog = '', title = '', selectedConfigFiles = null } = {}) => {
   const config = getGithubConfig();
   try {
     if (!config.token) throw new Error('Es ist noch kein GitHub-Token hinterlegt.');
@@ -1958,7 +2161,15 @@ ipcMain.handle('modpack-publish', async (event, { bumpType = 'patch', changelog 
       throw new Error(`Auf GitHub liegt v${remoteVersion}, dein Entwurf basiert auf v${baseVersion}. Setze den Entwurf zurück, damit nichts überschrieben wird.`);
     }
 
-    const nextVersion = bumpVersion(remoteVersion, bumpType);
+    let nextVersion;
+    if (bumpType === 'custom') {
+      if (!isValidCustomVersion(customVersion, remoteVersion)) {
+        throw new Error(`Die Versionsnummer muss das Format 1.2.3 haben und höher als v${remoteVersion} sein.`);
+      }
+      nextVersion = String(customVersion).trim();
+    } else {
+      nextVersion = bumpVersion(remoteVersion, bumpType);
+    }
     const history = Array.isArray(remote?.changelogHistory) ? [...remote.changelogHistory] : [];
     const cleanChangelog = String(changelog || '').trim();
 
@@ -2052,6 +2263,8 @@ ipcMain.handle('modpack-publish', async (event, { bumpType = 'patch', changelog 
     const manifest = {
       schemaVersion: 2,
       serverName: remote?.serverName ?? draft.serverName,
+      ...(remote?.serverDescription ? { serverDescription: remote.serverDescription } : {}),
+      ...(remote?.serverBanner ? { serverBanner: remote.serverBanner, serverBannerVersion: remote.serverBannerVersion || '' } : {}),
       serverAddress: remote?.serverAddress ?? draft.serverAddress,
       gameVersion: draft.gameVersion,
       loader: draft.loader,
@@ -2070,12 +2283,14 @@ ipcMain.handle('modpack-publish', async (event, { bumpType = 'patch', changelog 
     };
     const content = JSON.stringify(manifest, null, 2) + '\n';
 
+    // In einem leeren Repository gibt es den Branch noch nicht, dann legt GitHub den Standard-Branch selbst an
+    const repoIsEmpty = !current.ok && current.status === 404 && await isGithubRepoEmpty(config);
     const put = await githubRequest(endpoint, {
       method: 'PUT',
       body: {
         message: `modpack: v${nextVersion}`,
         content: Buffer.from(content, 'utf8').toString('base64'),
-        branch: config.branch,
+        ...(repoIsEmpty ? {} : { branch: config.branch }),
         ...(current.ok ? { sha: current.data.sha } : {})
       }
     });
@@ -2090,13 +2305,13 @@ ipcMain.handle('modpack-publish', async (event, { bumpType = 'patch', changelog 
       addManagedServerFiles(
         [...getManifestMods(remote), ...draft.mods].map(mod => mod.filename).filter(isSafeModFilename)
       );
-      // Nach Veröffentlichung ist der Test-Zustand offiziell übernommen
-      try {
-        writeJsonFile(serverTestBackupStatePath(), { active: false, publishedAt: new Date().toISOString() });
-      } catch (_e) {}
     } catch (err) {
       console.warn('Lokale Manifest-Dateien konnten nicht aktualisiert werden:', err.message);
     }
+    // Nach Veröffentlichung ist der Test-Zustand offiziell übernommen, auch wenn oben etwas schiefging
+    try {
+      writeJsonFile(serverTestBackupStatePath(), { active: false, publishedAt: new Date().toISOString() });
+    } catch (_e) {}
 
     return { success: true, manifest, draft: updatedDraft, version: nextVersion };
   } catch (err) {
@@ -2105,7 +2320,124 @@ ipcMain.handle('modpack-publish', async (event, { bumpType = 'patch', changelog 
   }
 });
 
-ipcMain.handle('modpack-update-changelog', async (event, { changelog, version, title }) => {
+// ─── Darstellung des Servers (Name, Beschreibung, Banner) auf GitHub ──────
+const PRESENTATION_BANNER_FILE = 'server-banner.png';
+
+async function githubPutRepoFile(config, filePath, buffer, message) {
+  const endpoint = `/repos/${config.owner}/${config.repo}/contents/${filePath}`;
+  const current = await githubRequest(`${endpoint}?ref=${encodeURIComponent(config.branch)}`);
+  if (!current.ok && current.status !== 404) throw new Error(describeGithubError(current, config));
+  const repoIsEmpty = !current.ok && await isGithubRepoEmpty(config);
+  const put = await githubRequest(endpoint, {
+    method: 'PUT',
+    body: {
+      message,
+      content: buffer.toString('base64'),
+      ...(repoIsEmpty ? {} : { branch: config.branch }),
+      ...(current.ok ? { sha: current.data.sha } : {})
+    }
+  });
+  if (!put.ok) throw new Error(describeGithubError(put, config));
+}
+
+async function githubDeleteRepoFile(config, filePath, message) {
+  const endpoint = `/repos/${config.owner}/${config.repo}/contents/${filePath}`;
+  const current = await githubRequest(`${endpoint}?ref=${encodeURIComponent(config.branch)}`);
+  if (current.status === 404) return;
+  if (!current.ok) throw new Error(describeGithubError(current, config));
+  const del = await githubRequest(endpoint, { method: 'DELETE', body: { message, sha: current.data.sha, branch: config.branch } });
+  if (!del.ok) throw new Error(describeGithubError(del, config));
+}
+
+function cleanPresentationText(value, max) {
+  return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+// bannerAction: 'keep' | 'set' | 'remove'. Name und Beschreibung leer = nicht gesetzt (dann gilt die Serverdatei).
+handleAdmin('modpack-update-presentation', async (event, { serverName = '', serverDescription = '', bannerAction = 'keep', banner = '' } = {}) => {
+  const config = getGithubConfig();
+  try {
+    if (!config.token) throw new Error('Es ist noch kein GitHub-Token hinterlegt.');
+
+    const name = cleanPresentationText(serverName, 60);
+    const description = cleanPresentationText(serverDescription, 140);
+
+    let bannerBuffer = null;
+    if (bannerAction === 'set') {
+      if (!isValidBannerDataUrl(banner)) throw new Error('Das Banner-Bild ist ungültig.');
+      bannerBuffer = bannerFromDataUrl(banner);
+    }
+
+    const endpoint = `/repos/${config.owner}/${config.repo}/contents/${MANIFEST_FILE}`;
+    const current = await githubRequest(`${endpoint}?ref=${encodeURIComponent(config.branch)}`);
+    if (!current.ok && current.status !== 404) throw new Error(describeGithubError(current, config));
+    const remote = current.ok
+      ? JSON.parse(Buffer.from(current.data.content, 'base64').toString('utf8'))
+      : getBundledManifest();
+
+    const manifest = { ...remote, serverName: name, serverDescription: description };
+
+    if (bannerAction === 'set') {
+      const bannerHash = crypto.createHash('sha1').update(bannerBuffer).digest('hex').slice(0, 8);
+      // Liegt dasselbe Bild schon auf GitHub, wird nichts neu hochgeladen
+      const alreadyPublished = remote.serverBanner === PRESENTATION_BANNER_FILE && remote.serverBannerVersion === bannerHash;
+      if (!alreadyPublished) {
+        await githubPutRepoFile(config, PRESENTATION_BANNER_FILE, bannerBuffer, 'server: Banner');
+      }
+      manifest.serverBanner = PRESENTATION_BANNER_FILE;
+      manifest.serverBannerVersion = bannerHash;
+    } else if (bannerAction === 'remove') {
+      await githubDeleteRepoFile(config, PRESENTATION_BANNER_FILE, 'server: Banner entfernt');
+      delete manifest.serverBanner;
+      delete manifest.serverBannerVersion;
+    }
+    if (!manifest.serverDescription) delete manifest.serverDescription;
+
+    // Das Manifest wird erst nach dem Banner geschrieben, damit es nie auf eine fehlende Datei zeigt
+    const repoIsEmpty = !current.ok && await isGithubRepoEmpty(config);
+    const put = await githubRequest(endpoint, {
+      method: 'PUT',
+      body: {
+        message: 'server: Name und Beschreibung',
+        content: Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf8').toString('base64'),
+        ...(repoIsEmpty ? {} : { branch: config.branch }),
+        ...(current.ok ? { sha: current.data.sha } : {})
+      }
+    });
+    if (!put.ok) throw new Error(describeGithubError(put, config));
+
+    try {
+      writeJsonFile(manifestCachePath(), manifest);
+    } catch (err) {
+      console.warn('Manifest-Cache konnte nicht geschrieben werden:', err.message);
+    }
+    // Beschreibung und Banner auch lokal merken, damit die Serverdatei dieselben Angaben nutzt
+    const storedAdmin = storedAdminServer();
+    let localBanner = storedAdmin.banner || '';
+    if (bannerAction === 'set') {
+      localBanner = writeBannerFile(ADMIN_SERVER_ID, banner);
+    } else if (bannerAction === 'remove') {
+      deleteBannerFile(ADMIN_SERVER_ID);
+      localBanner = '';
+    }
+    saveSettings({
+      adminServer: {
+        ...storedAdmin,
+        displayName: name,
+        description,
+        banner: localBanner,
+        bannerRemove: false
+      }
+    });
+    notifyAdminServerChanged();
+    return { success: true, manifest };
+  } catch (err) {
+    console.error('Darstellung veröffentlichen fehlgeschlagen:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+handleAdmin('modpack-update-changelog', async (event, { changelog, version, title }) => {
   const currentManifest = readJsonFile(manifestCachePath()) || getBundledManifest();
   const targetVer = version || currentManifest?.modpackVersion || '1.0.0';
   const cleanText = String(changelog || '').trim();
@@ -2445,7 +2777,10 @@ ipcMain.handle('guides-publish', async () => {
 // ─── BisectHosting & Server Admin API ──────────────────────────────────────
 ipcMain.handle('bisect-api', (event, options) => bisectRequest(options));
 
-async function bisectRequest({ method = 'GET', endpoint = '/api/client', body = null, configOverride = null }) {
+// Das Panel begrenzt Anfragen ("Too Many Attempts", HTTP 429). Dann wird gewartet und neu versucht.
+const BISECT_MAX_RATE_LIMIT_RETRIES = 8;
+
+async function bisectRequest({ method = 'GET', endpoint = '/api/client', body = null, configOverride = null, onWait = null }) {
   const settings = getSettings();
   const baseConfig = settings.bisectConfig || {};
   
@@ -2489,7 +2824,16 @@ async function bisectRequest({ method = 'GET', endpoint = '/api/client', body = 
       }
     }
 
-    const res = await fetch(fullUrl, fetchOptions);
+    let res;
+    for (let attempt = 0; ; attempt++) {
+      res = await fetch(fullUrl, fetchOptions);
+      if (res.status !== 429 || attempt >= BISECT_MAX_RATE_LIMIT_RETRIES) break;
+      const retryAfter = Number(res.headers.get('retry-after'));
+      const base = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 10 * (attempt + 1);
+      const waitSeconds = Math.min(Math.max(base, 3), 90);
+      if (onWait) onWait(waitSeconds, attempt + 1);
+      await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+    }
     const contentType = res.headers.get('content-type') || '';
 
     if (!res.ok) {
@@ -2534,12 +2878,13 @@ ipcMain.handle('select-mod-file', async () => {
   return result.filePaths[0];
 });
 
-async function uploadBufferToBisect(fileData, fileName, targetServerId, targetDir = 'mods', configOverride = null) {
-  // 1. Signierte Upload-URL vom Bisect/Pterodactyl Panel holen
+// Lädt eine oder mehrere Dateien in einer einzigen Upload-Anfrage hoch (eine Panel-Anfrage für die signierte URL)
+async function uploadFilesToBisect(files, targetServerId, targetDir = 'mods', configOverride = null, onWait = null) {
   const signedRes = await bisectRequest({
     method: 'GET',
     endpoint: `/api/client/servers/${targetServerId}/files/upload`,
-    configOverride
+    configOverride,
+    onWait
   });
   if (!signedRes.success || !signedRes.data?.attributes?.url) {
     return { success: false, error: signedRes.error || 'Upload-URL konnte nicht vom Panel abgerufen werden' };
@@ -2549,24 +2894,22 @@ async function uploadBufferToBisect(fileData, fileName, targetServerId, targetDi
   const sep = uploadUrl.includes('?') ? '&' : '?';
   uploadUrl = `${uploadUrl}${sep}directory=${encodeURIComponent(targetDir.startsWith('/') ? targetDir : `/${targetDir}`)}`;
 
-  // 2. Datei per FormData hochladen
   const boundary = '----WebKitFormBoundary' + crypto.randomBytes(16).toString('hex');
-  let body = `--${boundary}\r\n`;
-  body += `Content-Disposition: form-data; name="files"; filename="${fileName}"\r\n`;
-  body += `Content-Type: application/java-archive\r\n\r\n`;
-
-  const payload = Buffer.concat([
-    Buffer.from(body, 'utf8'),
-    fileData,
-    Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8')
-  ]);
+  const parts = [];
+  for (const file of files) {
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="${file.name}"\r\nContent-Type: application/java-archive\r\n\r\n`,
+      'utf8'
+    ));
+    parts.push(file.data);
+    parts.push(Buffer.from('\r\n', 'utf8'));
+  }
+  parts.push(Buffer.from(`--${boundary}--\r\n`, 'utf8'));
 
   const uploadResponse = await fetch(uploadUrl, {
     method: 'POST',
-    headers: {
-      'Content-Type': `multipart/form-data; boundary=${boundary}`
-    },
-    body: payload
+    headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+    body: Buffer.concat(parts)
   });
 
   if (!uploadResponse.ok) {
@@ -2574,7 +2917,12 @@ async function uploadBufferToBisect(fileData, fileName, targetServerId, targetDi
     throw new Error(`Panel Upload Fehler (${uploadResponse.status}): ${errText}`);
   }
 
-  return { success: true, fileName };
+  return { success: true };
+}
+
+async function uploadBufferToBisect(fileData, fileName, targetServerId, targetDir = 'mods', configOverride = null) {
+  const res = await uploadFilesToBisect([{ name: fileName, data: fileData }], targetServerId, targetDir, configOverride);
+  return res.success ? { success: true, fileName } : res;
 }
 
 ipcMain.handle('bisect-upload-mod', async (event, { filePath, serverId, targetDir = 'mods' }) => {
@@ -3241,6 +3589,45 @@ function notifyServersChanged() {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('servers-changed');
 }
 
+function notifyAdminServerChanged() {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('admin-server-changed', getSettings().adminServer || null);
+}
+
+// Entwurf der Darstellung (Name, Beschreibung, Banner) lokal speichern, unabhängig vom Veröffentlichen
+ipcMain.handle('admin-presentation-save', (event, { displayName = '', description = '', banner, bannerRemove = false } = {}) => {
+  const clean = (value, max) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+  const stored = storedAdminServer();
+  let bannerHash = stored.banner || '';
+  if (banner === '') {
+    deleteBannerFile(ADMIN_SERVER_ID);
+    bannerHash = '';
+  } else if (isValidBannerDataUrl(banner)) {
+    bannerHash = writeBannerFile(ADMIN_SERVER_ID, banner);
+  }
+  saveSettings({
+    adminServer: {
+      ...stored,
+      displayName: clean(displayName, SERVER_NAME_MAX),
+      description: clean(description, SERVER_DESCRIPTION_MAX),
+      banner: bannerHash,
+      bannerRemove: Boolean(bannerRemove)
+    }
+  });
+  notifyAdminServerChanged();
+  return { success: true };
+});
+
+ipcMain.handle('admin-server-save', (event, { name, address } = {}) => {
+  const cleanName = String(name ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, SERVER_NAME_MAX);
+  const cleanAddress = String(address ?? '').trim().toLowerCase();
+  if (cleanAddress && !isValidServerAddress(cleanAddress)) {
+    return { success: false, error: 'Die Server-Adresse ist ungültig (Beispiel: mc.beispiel.de:25565).' };
+  }
+  saveSettings({ adminServer: { ...storedAdminServer(), name: cleanName, address: cleanAddress } });
+  notifyAdminServerChanged();
+  return { success: true, adminServer: getSettings().adminServer };
+});
+
 function notifyInstancesChanged() {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('instances-changed');
 }
@@ -3254,7 +3641,8 @@ function serverBusyError() {
 
 ipcMain.handle('servers-list', () => ({
   servers: getServers(),
-  activeServerId: getSettings().activeServerId || null
+  activeServerId: getSettings().activeServerId || null,
+  adminServer: getSettings().adminServer || null
 }));
 
 ipcMain.handle('servers-add', (event, input) => {
@@ -3263,6 +3651,7 @@ ipcMain.handle('servers-add', (event, input) => {
 
   const servers = getServers();
   const record = createServerRecord(clean.server, servers.map(server => server.folder));
+  record.banner = clean.server.banner ? writeBannerFile(record.id, clean.server.banner) : '';
   ensureInstanceFolders(getInstanceDir(record));
   const nextActive = getSettings().activeServerId && servers.some(s => s.id === getSettings().activeServerId)
     ? getSettings().activeServerId
@@ -3283,6 +3672,7 @@ ipcMain.handle('servers-update', (event, { id, data }) => {
   const updated = {
     ...current,
     name: clean.server.name,
+    description: clean.server.description,
     address: clean.server.address,
     owner: clean.server.owner,
     repo: clean.server.repo,
@@ -3331,6 +3721,7 @@ ipcMain.handle('servers-remove', async (event, { id, deleteFiles = false }) => {
   const rest = servers.filter(item => item.id !== id);
   const wasActive = getSettings().activeServerId === id;
   saveServers(rest, wasActive ? (rest[0]?.id || null) : getSettings().activeServerId);
+  deleteBannerFile(id);
 
   if (deleteFiles) {
     try {
@@ -3354,9 +3745,52 @@ ipcMain.handle('servers-open-folder', async (event, id) => {
   return { success: true };
 });
 
-ipcMain.handle('servers-export', async (event, { id, name }) => {
-  const server = getServers().find(item => item.id === id);
+ipcMain.handle('servers-export', async (event, { id, name, description, banner }) => {
+  const isAdminServer = id === ADMIN_SERVER_ID;
+  let server = isAdminServer ? getAdminServer() : getServers().find(item => item.id === id);
   if (!server) return { success: false, error: 'Server nicht gefunden.' };
+  if (isAdminServer && ((!name && !server.name) || !server.address)) {
+    return { success: false, error: 'Trage im Server-Admin zuerst die Adresse des Servers ein (Karte „Server, den du verwaltest“).' };
+  }
+  // Beschreibung und Banner bleiben am Server gespeichert, damit sie auch bei dir angezeigt werden.
+  // Banner: Data-URL = neues Bild, leer = entfernen, nichts = das gespeicherte behalten.
+  let bannerHash = server.banner || '';
+  if (banner === '') {
+    deleteBannerFile(id);
+    bannerHash = '';
+  } else if (isValidBannerDataUrl(banner)) {
+    bannerHash = writeBannerFile(id, banner);
+  }
+  let nextDescription = server.description || '';
+  if (description !== undefined) {
+    const clean = sanitizeServerInput({ ...server, banner: '', github: `${server.owner}/${server.repo}`, description });
+    if (clean.ok) nextDescription = clean.server.description;
+  }
+  if (nextDescription !== (server.description || '') || bannerHash !== (server.banner || '')) {
+    server = { ...server, description: nextDescription, banner: bannerHash };
+    if (isAdminServer) {
+      saveSettings({ adminServer: { ...storedAdminServer(), description: nextDescription, banner: bannerHash } });
+      notifyAdminServerChanged();
+    } else {
+      saveServers(getServers().map(item => (item.id === id ? server : item)), getSettings().activeServerId);
+      notifyServersChanged();
+    }
+  }
+
+  // Banner für die Datei: das gewählte oder gespeicherte, sonst (nur Admin) eines, das schon auf GitHub liegt
+  let fileBanner = isValidBannerDataUrl(banner) ? banner : (bannerHash ? readBannerDataUrl(id) : '');
+  if (!fileBanner && isAdminServer && banner === undefined && server.owner && server.repo) {
+    try {
+      const res = await fetch(
+        `https://raw.githubusercontent.com/${server.owner}/${server.repo}/${server.branch || 'main'}/${PRESENTATION_BANNER_FILE}`,
+        { signal: AbortSignal.timeout(8000) }
+      );
+      if (res.ok) {
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (isPngBuffer(buffer) && buffer.length <= BANNER_MAX_BYTES) fileBanner = bannerToDataUrl(buffer);
+      }
+    } catch (_e) { /* ohne Banner weiter */ }
+  }
   const fileName = `${folderNameFor(name || server.name, [], [])}.${SERVER_FILE_EXTENSION}`;
   const result = await dialog.showSaveDialog(mainWindow, {
     title: 'Server-Datei speichern',
@@ -3365,17 +3799,72 @@ ipcMain.handle('servers-export', async (event, { id, name }) => {
   });
   if (result.canceled || !result.filePath) return { success: false, canceled: true };
   try {
-    fs.writeFileSync(result.filePath, buildServerFile(server, name), 'utf8');
+    fs.writeFileSync(result.filePath, buildServerFile(server, name, server.description, fileBanner), 'utf8');
     return { success: true, filePath: result.filePath };
   } catch (err) {
     return { success: false, error: err.message };
   }
 });
 
+// ─── Server-Banner (PNG im Verhältnis 30:10) ──────────────────────────────
+const BANNER_RATIO = 3;
+const BANNER_RATIO_TOLERANCE = 0.09;
+const BANNER_MIN_WIDTH = 300;
+const BANNER_MAX_WIDTH = 1920; // Full HD: 1920 x 640
+
+// Prüft das Bild, verkleinert es auf höchstens 1920x640 (Full HD) und hält die Datei unter der Grenze
+function prepareBannerPng(buffer) {
+  if (!isPngBuffer(buffer)) return { ok: false, error: 'Das ist keine PNG-Datei.' };
+  const image = nativeImage.createFromBuffer(buffer);
+  if (image.isEmpty()) return { ok: false, error: 'Das Bild konnte nicht gelesen werden.' };
+  const { width, height } = image.getSize();
+  if (Math.abs(width / height - BANNER_RATIO) > BANNER_RATIO_TOLERANCE) {
+    return { ok: false, error: `Das Bild muss das Seitenverhältnis 30:10 (3:1) haben, zum Beispiel 900 x 300 Pixel. Dieses hat ${width} x ${height}.` };
+  }
+  if (width < BANNER_MIN_WIDTH) {
+    return { ok: false, error: `Das Bild ist zu klein (mindestens ${BANNER_MIN_WIDTH} Pixel breit, dieses hat ${width}).` };
+  }
+  // Passt das Bild schon (höchstens 1920 Pixel breit, klein genug), bleibt die Datei unverändert.
+  // Neu kodiert würde ein optimiertes PNG größer und müsste dann stärker verkleinert werden.
+  if (width <= BANNER_MAX_WIDTH && buffer.length <= BANNER_MAX_BYTES) {
+    return { ok: true, dataUrl: bannerToDataUrl(buffer), width, height, bytes: buffer.length, originalWidth: width };
+  }
+
+  // In kleinen Schritten verkleinern, damit so viel Auflösung wie möglich bleibt
+  for (const target of [1920, 1600, 1280, 1080, 900, 720, 600, 450, 300]) {
+    const outWidth = Math.min(width, target);
+    const outHeight = Math.round(outWidth / BANNER_RATIO);
+    const png = image.resize({ width: outWidth, height: outHeight, quality: 'best' }).toPNG();
+    if (png.length <= BANNER_MAX_BYTES) {
+      return { ok: true, dataUrl: bannerToDataUrl(png), width: outWidth, height: outHeight, bytes: png.length, originalWidth: width };
+    }
+  }
+  return { ok: false, error: `Das Bild ist auch verkleinert größer als ${Math.round(BANNER_MAX_BYTES / (1024 * 1024))} MB. Nimm ein einfacheres Bild mit weniger Verläufen.` };
+}
+
+ipcMain.handle('server-banner-pick', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Server-Banner wählen (PNG, 30:10)',
+    properties: ['openFile'],
+    filters: [{ name: 'PNG-Bild', extensions: ['png'] }]
+  });
+  if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true };
+  try {
+    const filePath = result.filePaths[0];
+    if (fs.statSync(filePath).size > 20 * 1024 * 1024) return { success: false, error: 'Das Bild ist zu groß (höchstens 20 MB).' };
+    const prepared = prepareBannerPng(fs.readFileSync(filePath));
+    return prepared.ok
+      ? { success: true, dataUrl: prepared.dataUrl, width: prepared.width, height: prepared.height, bytes: prepared.bytes, originalWidth: prepared.originalWidth }
+      : { success: false, error: prepared.error };
+  } catch (err) {
+    return { success: false, error: `Das Bild konnte nicht gelesen werden: ${err.message}` };
+  }
+});
+
 function readServerFile(filePath) {
   try {
     const stat = fs.statSync(filePath);
-    if (!stat.isFile() || stat.size > 20000) return { ok: false, error: 'Die Datei ist zu groß für eine Serverdatei.' };
+    if (!stat.isFile() || stat.size > SERVER_FILE_MAX_CHARS) return { ok: false, error: 'Die Datei ist zu groß für eine Serverdatei.' };
     const parsed = parseServerFile(fs.readFileSync(filePath, 'utf8'));
     return { ...parsed, fileName: path.basename(filePath) };
   } catch (err) {
@@ -4840,10 +5329,63 @@ function destroyTray() {
   }
 }
 
+// Fragt unter Windows ab, ob der Prozess schon ein Fenster hat (MainWindowHandle ungleich 0)
+function minecraftHasWindow(pid) {
+  return new Promise(resolve => {
+    if (process.platform !== 'win32' || !Number.isInteger(pid)) return resolve(false);
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).MainWindowHandle`],
+      { windowsHide: true, timeout: 5000 },
+      (err, stdout) => resolve(!err && Number(String(stdout).trim()) > 0)
+    );
+  });
+}
+
+let minecraftReady = false;
+let minecraftWatchTimer = null;
+const MINECRAFT_WINDOW_TIMEOUT_MS = 3 * 60 * 1000;
+
+function stopWatchingMinecraft() {
+  if (minecraftWatchTimer) {
+    clearInterval(minecraftWatchTimer);
+    minecraftWatchTimer = null;
+  }
+}
+
+// Minecraft ist gestartet, aber das Fenster ist noch nicht da: Startanzeige bleibt bis dahin sichtbar
 function handleMinecraftStarted(proc) {
   activeMinecraftProcess = proc;
+  minecraftReady = false;
+  stopWatchingMinecraft();
+  setGameStatus('starting', 'Minecraft öffnet sich...', 98);
+  emitGameLog(`[Launcher] Minecraft-Prozess läuft (PID: ${proc.pid}), warte auf das Spielfenster...`);
+
+  const startedAt = Date.now();
+  let checking = false;
+  minecraftWatchTimer = setInterval(async () => {
+    if (minecraftReady || activeMinecraftProcess !== proc) return stopWatchingMinecraft();
+    if (Date.now() - startedAt > MINECRAFT_WINDOW_TIMEOUT_MS) {
+      emitGameLog('[Launcher] Kein Spielfenster erkannt, der Prozess läuft aber. Startanzeige wird beendet.');
+      return markMinecraftReady();
+    }
+    if (checking) return;
+    checking = true;
+    try {
+      if (await minecraftHasWindow(proc.pid)) markMinecraftReady();
+    } finally {
+      checking = false;
+    }
+  }, 1500);
+}
+
+// Das Spielfenster ist offen: erst jetzt gilt Minecraft als gestartet
+function markMinecraftReady() {
+  if (minecraftReady || !activeMinecraftProcess) return;
+  minecraftReady = true;
+  stopWatchingMinecraft();
   setGameStatus('running', 'Minecraft läuft', 100);
-  emitGameLog(`[Launcher] Minecraft erfolgreich gestartet (PID: ${proc.pid})`);
+  emitGameLog(`[Launcher] Minecraft ist offen (PID: ${activeMinecraftProcess.pid})`);
 
   const settings = getSettings();
   const behavior = settings.gameLaunchBehavior || 'hide';
@@ -4868,6 +5410,8 @@ function handleMinecraftStarted(proc) {
 }
 
 function handleMinecraftStopped(code = 0) {
+  stopWatchingMinecraft();
+  minecraftReady = false;
   activeMinecraftProcess = null;
   setGameStatus('idle', '', 0);
   destroyTray();
@@ -4929,7 +5473,7 @@ ipcMain.handle('launch-game', (event, launchConfig) => {
 
 // Startet den gespeicherten Entwurf in einer eigenen Instanz. Assets, Bibliotheken und
 // Versionen werden geteilt, Mods, Einstellungen und Welten liegen getrennt.
-ipcMain.handle('modpack-launch-test', async () => {
+handleAdmin('modpack-launch-test', async () => {
   if (activeMinecraftProcess || currentGameStatus.status !== 'idle') {
     return { success: false, error: 'Minecraft läuft bereits oder wird gerade gestartet.' };
   }
@@ -4950,7 +5494,7 @@ ipcMain.handle('modpack-launch-test', async () => {
   return launchMinecraft({
     instanceDir,
     isTestInstance: true,
-    serverName: draft.serverName,
+    serverName: draft.serverName || getActiveServer()?.name,
     listedServerAddress: getActiveServer()?.address || draft.serverAddress,
     gameVersion: draft.gameVersion,
     loader: draft.loader,
@@ -5082,6 +5626,10 @@ async function launchMinecraft(launchConfig = {}) {
 
     launcher.on('data', (e) => {
       emitGameLog(`[Minecraft] ${e}`);
+      // Zusätzliches Signal neben der Fensterprüfung: Rendering ist initialisiert
+      if (!minecraftReady && activeMinecraftProcess && /OpenAL initialized|Created: \d+x\d+x\d+ minecraft:textures\/atlas/.test(String(e))) {
+        markMinecraftReady();
+      }
     });
 
     launcher.on('progress', (e) => {

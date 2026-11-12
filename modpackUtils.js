@@ -26,6 +26,12 @@ export function bumpVersion(current, type = 'patch') {
   return `${major}.${minor}.${patch + 1}`;
 }
 
+// Eigene Versionsnummer (z. B. 0.0.1): Format x.y.z und höher als die veröffentlichte Version
+export function isValidCustomVersion(candidate, current) {
+  return /^\d+\.\d+\.\d+$/.test(String(candidate || '').trim())
+    && compareVersions(String(candidate).trim(), current || INITIAL_MODPACK_VERSION) > 0;
+}
+
 // Liest neues (mods) und altes (requiredMods) Manifest-Format
 export function getManifestMods(manifest) {
   return manifest?.mods || manifest?.requiredMods || [];
