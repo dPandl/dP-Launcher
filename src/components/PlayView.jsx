@@ -178,6 +178,8 @@ export default function PlayView({ manifest, activeSeason, settings, account, on
   const handleSyncMods = async () => {
     setIsSyncing(true);
     await syncManifest(await loadCurrentManifest());
+    // Ein Abgleich allein ist kein Spielstart, der Status geht zurück auf "bereit"
+    window.electronAPI?.resetGameStatus?.();
   };
 
   const handleLaunch = async () => {
@@ -194,6 +196,7 @@ export default function PlayView({ manifest, activeSeason, settings, account, on
       const synced = await syncManifest(target);
       if (!synced) {
         setIsPreparingLaunch(false);
+        window.electronAPI?.resetGameStatus?.();
         return;
       }
 
@@ -204,7 +207,7 @@ export default function PlayView({ manifest, activeSeason, settings, account, on
           serverName: target?.serverName || activeServer?.name,
           gameVersion: getTargetGameVersion(target, serverPing),
           loader: target?.loader || 'fabric',
-          loaderVersion: target?.loaderVersion || '0.16.9'
+          loaderVersion: target?.loaderVersion || ''
         });
 
         if (res && !res.success) {
@@ -214,6 +217,7 @@ export default function PlayView({ manifest, activeSeason, settings, account, on
       }
     } catch (err) {
       setIsPreparingLaunch(false);
+      window.electronAPI?.resetGameStatus?.();
       console.error(err);
       appAlert(`Fehler beim Spielstart: ${err.message}`, { warning: true });
     }

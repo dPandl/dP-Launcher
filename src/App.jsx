@@ -16,6 +16,7 @@ import UpdateModal from './components/UpdateModal';
 import SeasonalEffects from './components/effects/SeasonalEffects';
 import { applySeasonTheme, getActiveSeasonConfig, getCurrentSeason, subscribeSystemTheme } from './services/seasonManager';
 import { getAdminServer, getActiveServer } from './utils/serverAddress';
+import { appAlert } from './utils/appDialog';
 import { releaseNotes } from './releaseNotes';
 
 // Fallback Manifest falls noch kein Server existiert
@@ -113,6 +114,13 @@ export default function App() {
       const result = await window.electronAPI.fetchPublishedModpack();
       latest = result?.manifest || null;
       if (latest) setPublishedManifest(latest);
+      // Die Adresse des Servers hat sich im Repository geändert und wurde übernommen
+      if (result?.addressChanged) {
+        const list = await window.electronAPI.listServers();
+        setSettings(prev => ({ ...prev, servers: list.servers }));
+        const change = result.addressChanged;
+        appAlert(`Die Adresse von „${change.serverName}“ hat sich geändert:\n${change.from} → ${change.to}\n\nDer Launcher hat sie übernommen.`, { title: 'Server-Adresse aktualisiert' });
+      }
     } catch (err) {
       console.warn('Modliste konnte nicht geladen werden:', err);
     }

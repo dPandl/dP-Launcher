@@ -1469,6 +1469,16 @@ function resolveManifestTarget(userInput, fallbackConfig) {
 }
 
 // GitHub-API (immer aktuell) → Rohdatei (bis ca. 5 Minuten Cache) → lokaler Cache → mitgelieferte Datei
+// Ändert sich die Adresse im Manifest des Repositorys, übernimmt der Spiel-Server sie.
+// Nur für Server mit Repository und nur aus einem frisch geladenen Manifest. Liefert die Änderung oder null.
+function syncServerAddressFromManifest(manifest) {
+  const server = getActiveServer();
+  const address = String(manifest?.serverAddress || '').trim();
+  if (!server || !server.owner || !server.repo || !address || !isValidServerAddress(address) || address.toLowerCase() === String(server.address).toLowerCase()) return null;
+  saveServers(getServers().map(item => (item.id === server.id ? { ...item, address } : item)), getSettings().activeServerId);
+  return { serverId: server.id, serverName: server.name, from: server.address, to: address };
+}
+
 async function fetchPublishedModpack() {
   const settings = getSettings();
   const { owner, repo, branch } = getGithubConfig();
@@ -1505,7 +1515,11 @@ async function fetchPublishedModpack() {
     } catch (err) {
       console.warn('Manifest-Cache konnte nicht geschrieben werden:', err.message);
     }
-    return { manifest, source };
+    // Im Admin-Kontext gilt der Admin-Server, dort wird nichts am Spiel-Server geändert
+    const addressChanged = !adminContext.getStore() && (source === 'github' || source === 'raw')
+      ? syncServerAddressFromManifest(manifest)
+      : null;
+    return { manifest, source, addressChanged };
   }
 
   if (isValidManifest(cached)) return { manifest: cached, source: 'cache' };
@@ -2265,7 +2279,7 @@ handleAdmin('modpack-publish', async (event, { bumpType = 'patch', customVersion
       serverName: remote?.serverName ?? draft.serverName,
       ...(remote?.serverDescription ? { serverDescription: remote.serverDescription } : {}),
       ...(remote?.serverBanner ? { serverBanner: remote.serverBanner, serverBannerVersion: remote.serverBannerVersion || '' } : {}),
-      serverAddress: remote?.serverAddress ?? draft.serverAddress,
+      serverAddress: getAdminServer().address || remote?.serverAddress || draft.serverAddress || '',
       gameVersion: draft.gameVersion,
       loader: draft.loader,
       loaderVersion: draft.loaderVersion,
@@ -2375,7 +2389,9 @@ handleAdmin('modpack-update-presentation', async (event, { serverName = '', serv
       ? JSON.parse(Buffer.from(current.data.content, 'base64').toString('utf8'))
       : getBundledManifest();
 
-    const manifest = { ...remote, serverName: name, serverDescription: description };
+    // Die Adresse des Admin-Servers geht mit, damit sich eine geänderte IP bei allen Spielern aktualisiert
+    const adminAddress = storedAdminServer().address;
+    const manifest = { ...remote, serverName: name, serverDescription: description, ...(adminAddress ? { serverAddress: adminAddress } : {}) };
 
     if (bannerAction === 'set') {
       const bannerHash = crypto.createHash('sha1').update(bannerBuffer).digest('hex').slice(0, 8);
@@ -3619,7 +3635,7 @@ ipcMain.handle('admin-presentation-save', (event, { displayName = '', descriptio
 
 ipcMain.handle('admin-server-save', (event, { name, address } = {}) => {
   const cleanName = String(name ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, SERVER_NAME_MAX);
-  const cleanAddress = String(address ?? '').trim().toLowerCase();
+  const cleanAddress = String(address ?? '').trim();
   if (cleanAddress && !isValidServerAddress(cleanAddress)) {
     return { success: false, error: 'Die Server-Adresse ist ungültig (Beispiel: mc.beispiel.de:25565).' };
   }
@@ -5204,27 +5220,48 @@ ipcMain.handle('detect-java', async () => {
 });
 
 // ─── Fabric & Game Launch Helper ───────────────────────────────────────────
-async function prepareFabricVersionJson(gameVersion = '26.3', loaderVersion = '0.19.5') {
-  let effectiveLoader = loaderVersion || '0.19.5';
-  if (String(gameVersion).startsWith('26') && (effectiveLoader === '0.16.9' || !effectiveLoader)) {
-    effectiveLoader = '0.19.5';
-  }
-
-  // Versuche die neueste stabile Fabric Loader Version von meta.fabricmc.net abzurufen
+// Bereits installierte Fabric-Version für diese Minecraft-Version (Rückfall ohne Internet)
+function findInstalledFabricLoader(gameVersion) {
   try {
-    const metaLoaderRes = await fetch(`https://meta.fabricmc.net/v2/versions/loader/${gameVersion}`, {
-      signal: AbortSignal.timeout(4000)
-    });
-    if (metaLoaderRes.ok) {
-      const loaders = await metaLoaderRes.json();
-      if (Array.isArray(loaders) && loaders.length > 0) {
-        const stable = loaders.find(l => l.loader?.stable) || loaders[0];
-        if (stable?.loader?.version) {
-          effectiveLoader = stable.loader.version;
-        }
+    const prefix = 'fabric-loader-';
+    const suffix = `-${gameVersion}`;
+    const found = fs.readdirSync(path.join(gameDir, 'versions'))
+      .filter(name => name.startsWith(prefix) && name.endsWith(suffix))
+      .map(name => name.slice(prefix.length, name.length - suffix.length))
+      .sort();
+    return found[found.length - 1] || '';
+  } catch (_e) {
+    return '';
+  }
+}
+
+// Fabric-Loader-Versionen für eine Minecraft-Version (neueste zuerst) von meta.fabricmc.net
+async function fetchFabricLoaderList(gameVersion) {
+  const res = await fetch(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(gameVersion)}`, { signal: AbortSignal.timeout(6000) });
+  if (!res.ok) throw new Error(`meta.fabricmc.net antwortet mit HTTP ${res.status}`);
+  const list = await res.json();
+  return Array.isArray(list) ? list.filter(entry => entry?.loader?.version) : [];
+}
+
+// Nimmt die Fabric-Version aus dem Manifest. Ohne Angabe oder wenn es sie für diese Minecraft-Version nicht gibt,
+// gilt die neueste stabile Version.
+async function prepareFabricVersionJson(gameVersion, loaderVersion = '') {
+  const wanted = String(loaderVersion || '').trim();
+  let effectiveLoader = '';
+  try {
+    const loaders = await fetchFabricLoaderList(gameVersion);
+    if (loaders.length > 0) {
+      if (wanted && loaders.some(entry => entry.loader.version === wanted)) {
+        effectiveLoader = wanted;
+      } else {
+        if (wanted) emitGameLog(`[Launcher] Fabric ${wanted} gibt es für Minecraft ${gameVersion} nicht, die neueste stabile Version wird genommen.`);
+        effectiveLoader = (loaders.find(entry => entry.loader.stable) || loaders[0]).loader.version;
       }
     }
-  } catch (e) {}
+  } catch (_e) { /* ohne Verbindung geht es unten weiter */ }
+
+  if (!effectiveLoader) effectiveLoader = wanted || findInstalledFabricLoader(gameVersion);
+  if (!effectiveLoader) throw new Error('Die Fabric-Version konnte nicht ermittelt werden (keine Verbindung zu meta.fabricmc.net).');
 
   const customVersion = `fabric-loader-${effectiveLoader}-${gameVersion}`;
   const versionDir = path.join(gameDir, 'versions', customVersion);
@@ -5260,6 +5297,53 @@ async function prepareFabricVersionJson(gameVersion = '26.3', loaderVersion = '0
   fs.writeFileSync(targetJsonPath, JSON.stringify(merged, null, 2), 'utf8');
   return { versionId: customVersion, jsonPath: targetJsonPath };
 }
+
+ipcMain.handle('fabric-loader-versions', async (event, gameVersion) => {
+  const version = String(gameVersion || '').trim();
+  if (!/^[0-9A-Za-z._-]{1,32}$/.test(version)) return { success: false, error: 'Ungültige Minecraft-Version.' };
+  try {
+    const loaders = await fetchFabricLoaderList(version);
+    return { success: true, versions: loaders.map(entry => ({ version: entry.loader.version, stable: Boolean(entry.loader.stable) })) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Versionen vom BisectHosting-Server auslesen (Fabric-Loader und Minecraft), soweit das Panel sie in den Dateien verrät
+ipcMain.handle('server-detect-versions', async () => {
+  const serverId = getSettings().bisectConfig?.serverId;
+  if (!serverId) return { success: false, error: 'Keine Verbindung zu BisectHosting. Trage die Zugangsdaten ein und teste die Verbindung.' };
+
+  const list = async (dir) => {
+    const res = await bisectRequest({ endpoint: `/api/client/servers/${serverId}/files/list?directory=${encodeURIComponent(dir)}` });
+    return res.success ? (res.data?.data || []).map(item => item.attributes) : null;
+  };
+  const folderNames = (entries) => (entries || []).filter(entry => entry && entry.is_file === false).map(entry => entry.name);
+  const newest = (names) => [...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop() || '';
+
+  try {
+    const checked = [];
+    // Fabric-Loader: der Server legt ihn unter libraries/net/fabricmc/fabric-loader/<Version> ab
+    const loaderFolders = folderNames(await list('/libraries/net/fabricmc/fabric-loader'));
+    checked.push('libraries/net/fabricmc/fabric-loader');
+    const loaderVersion = newest(loaderFolders.filter(name => /^\d+\.\d+\.\d+/.test(name)));
+
+    // Minecraft: versions/<Version> (Mojang-Starter) oder libraries/net/minecraft/server/<Version>
+    let gameVersion = '';
+    for (const dir of ['/versions', '/libraries/net/minecraft/server']) {
+      checked.push(dir.slice(1));
+      const names = folderNames(await list(dir)).map(name => name.split('-')[0]).filter(name => /^\d+(\.\d+){1,2}$/.test(name));
+      if (names.length > 0) { gameVersion = newest(names); break; }
+    }
+
+    if (!loaderVersion && !gameVersion) {
+      return { success: false, error: `Auf dem Server wurde keine Version gefunden (geprüft: ${checked.join(', ')}). Trage sie von Hand ein.` };
+    }
+    return { success: true, loaderVersion, gameVersion };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
 
 // ─── System Tray & Game Process Lifecycle ──────────────────────────────────
 let appTray = null;
@@ -5459,6 +5543,12 @@ ipcMain.handle('get-game-status', () => {
   return currentGameStatus;
 });
 
+// Nach einem reinen Abgleich der Mods (ohne Spielstart) darf der Status nicht auf "wird gestartet" stehen bleiben
+ipcMain.handle('reset-game-status', () => {
+  if (!activeMinecraftProcess) setGameStatus('idle', '', 0);
+  return currentGameStatus;
+});
+
 ipcMain.handle('kill-game', async () => {
   return killMinecraftProcess();
 });
@@ -5533,7 +5623,8 @@ async function launchMinecraft(launchConfig = {}) {
     const ramMin = Math.min(settings.ramMin || 2, ramMax);
     const gameVersion = launchConfig.gameVersion || '26.3';
     const loader = (launchConfig.loader || 'fabric').toLowerCase();
-    const loaderVersion = launchConfig.loaderVersion || (String(gameVersion).startsWith('26') ? '0.19.5' : '0.16.9');
+    // Leer = neueste stabile Fabric-Version. Fest eingetragen ist nichts mehr.
+    const loaderVersion = launchConfig.loaderVersion || '';
     // Die Testinstanz startet im Hauptmenü, der Server muss noch nicht zum Entwurf passen
     const serverAddress = (launchConfig.isTestInstance || launchConfig.noAutoJoin) ? null : (launchConfig.serverAddress || getActiveServer()?.address || settings.serverIp);
 

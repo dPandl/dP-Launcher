@@ -17,7 +17,7 @@ export default function AdminServerCard({ settings }) {
     setAddress(server.address);
   }, [server.name, server.address]);
 
-  const dirty = name.trim() !== server.name || address.trim().toLowerCase() !== server.address;
+  const dirty = name.trim() !== server.name || address.trim() !== server.address;
 
   const handleSave = async () => {
     if (!window.electronAPI?.saveAdminServer) return;
@@ -40,7 +40,7 @@ export default function AdminServerCard({ settings }) {
         <h3 style={{ fontSize: '17px', fontWeight: 700, margin: 0 }}>Server, den du verwaltest</h3>
       </div>
       <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', lineHeight: 1.6, margin: '0 0 14px' }}>
-        Entwurf, Veröffentlichung und Teilen gelten für diesen Server. Das hat nichts mit den Servern im Reiter „Server“ zu tun, die du zum Spielen eingetragen hast. Das GitHub-Repository gibst du darunter an.
+        Entwurf, Veröffentlichung und Teilen gelten für diesen Server. Das hat nichts mit den Servern im Reiter „Server“ zu tun, die du zum Spielen eingetragen hast. Das GitHub-Repository gibst du darunter an. Ändert sich die Adresse, wird sie beim nächsten Veröffentlichen (Modpack oder Darstellung) auch bei allen Spielern übernommen.
       </p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
         <div>

@@ -1,5 +1,22 @@
 export const releaseNotes = [
   {
+    version: '0.1.3',
+    date: '12.11.2026',
+    title: 'Fabric-Version, Server-Adresse und ein Fix beim Spielstart',
+    whatsNew: [
+      'Minecraft- und Fabric-Version lassen sich im Server-Admin einstellen, auch vom BisectHosting-Server auslesen',
+      'Eine geänderte Server-Adresse wird über GitHub synchronisiert und beim Spieler automatisch übernommen'
+    ],
+    bugFixes: [
+      'Der Launcher startet mit der Fabric-Version aus dem Manifest statt immer mit der neuesten',
+      'Der Spielen-Knopf bleibt nach einem reinen Mod-Abgleich nicht mehr auf „wird gestartet“ hängen'
+    ],
+    adjustments: [
+      'Server-Adressen behalten die eingegebene Schreibweise',
+      'Eine geänderte Minecraft- oder Fabric-Version lässt sich auch ohne Mod-Änderung veröffentlichen'
+    ]
+  },
+  {
     version: '0.1.2',
     date: '12.11.2026',
     title: 'Übersichtlichere Update-Hinweise',

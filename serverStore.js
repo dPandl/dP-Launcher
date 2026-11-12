@@ -67,7 +67,8 @@ export function sanitizeServerInput(input) {
   const name = cleanText(input?.name).slice(0, NAME_MAX);
   if (!name) return { ok: false, error: 'Der Server braucht einen Namen.' };
 
-  const address = cleanText(input?.address).toLowerCase();
+  // Groß- und Kleinschreibung bleibt, wie eingegeben (Hostnamen sind ohnehin unabhängig davon)
+  const address = cleanText(input?.address);
   if (!address) return { ok: false, error: 'Die Server-Adresse fehlt.' };
   if (!ADDRESS_RE.test(address)) return { ok: false, error: 'Die Server-Adresse ist ungültig (Beispiel: mc.beispiel.de:25565).' };
   const portPart = address.split(':')[1];

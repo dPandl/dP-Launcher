@@ -20,6 +20,7 @@ import { appConfirm, appAlert } from '../utils/appDialog';
 import { resolveServerAddress, getAdminServer } from '../utils/serverAddress';
 import AdminServerCard from './admin/AdminServerCard';
 import BisectCredentialsCard from './admin/BisectCredentialsCard';
+import GameVersionCard from './admin/GameVersionCard';
 
 export default function AdminPanelView({
   settings,
@@ -88,6 +89,7 @@ export default function AdminPanelView({
   const repositoryPanel = (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px', paddingBottom: '14px' }}>
       <AdminServerCard settings={settings} />
+      {draft && <GameVersionCard draft={draft} published={publishedManifest} onDraftChange={onDraftChange} />}
       <BisectCredentialsCard settings={settings} onUpdateSettings={onUpdateSettings} />
       <GithubSettingsCard />
       <ServerPresentationCard settings={settings} manifest={publishedManifest} onRefreshManifest={onRefreshManifest} />

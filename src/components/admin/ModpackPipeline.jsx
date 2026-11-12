@@ -79,7 +79,11 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
   const publishedIsPinned = Array.isArray(published?.mods);
   const isCustom = bumpType === 'custom';
   const customVersionValid = isValidCustomVersion(customVersion, published?.modpackVersion);
-  const canPublish = draft.mods.length > 0 && (diff.total > 0 || !publishedIsPinned) && (!isCustom || customVersionValid);
+  // Auch eine geänderte Minecraft- oder Fabric-Version allein ist eine Änderung, die veröffentlicht werden darf
+  const versionsChanged = publishedIsPinned && (
+    (draft.gameVersion || '') !== (published?.gameVersion || '') || (draft.loaderVersion || '') !== (published?.loaderVersion || '')
+  );
+  const canPublish = draft.mods.length > 0 && (diff.total > 0 || versionsChanged || !publishedIsPinned) && (!isCustom || customVersionValid);
   const nextVersion = isCustom ? customVersion.trim() : bumpVersion(published?.modpackVersion, bumpType);
   const serverPending = serverPlan && (serverPlan.upload.length > 0 || serverPlan.remove.length > 0);
 
@@ -484,7 +488,12 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
       {/* 3. Veröffentlichen */}
       <Step icon={Rocket} title="3. Veröffentlichen">
         <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>
-          {diff.total === 0 && 'Keine Änderungen gegenüber der veröffentlichten Liste.'}
+          {diff.total === 0 && !versionsChanged && 'Keine Änderungen gegenüber der veröffentlichten Liste.'}
+          {versionsChanged && (
+            <div style={{ color: '#38bdf8' }}>
+              ~ Version: Minecraft {published?.gameVersion || '?'} → {draft.gameVersion || '?'}, Fabric {published?.loaderVersion || 'automatisch'} → {draft.loaderVersion || 'automatisch'}
+            </div>
+          )}
           {diff.added.map(mod => (
             <div key={mod.slug} style={{ color: '#10b981' }}>+ {mod.name} {mod.versionNumber}</div>
           ))}
