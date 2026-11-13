@@ -77,7 +77,11 @@ export function isSafePackFilename(filename) {
 export function isAllowedModUrl(url) {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === 'https:' && parsed.hostname === 'cdn.modrinth.com';
+    if (parsed.protocol !== 'https:') return false;
+    if (parsed.hostname === 'cdn.modrinth.com') return true;
+    // Eigene Mods liegen im Ordner custom-mods des Modpack-Repositorys
+    return parsed.hostname === 'raw.githubusercontent.com'
+      && /^\/[^/]+\/[^/]+\/[^/]+\/custom-mods\/[^/]+\.jar$/.test(parsed.pathname);
   } catch (e) {
     return false;
   }

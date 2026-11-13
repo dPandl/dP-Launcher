@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Trash2, RefreshCw, ArrowUpCircle, RotateCcw, AlertCircle, ToggleLeft, ToggleRight, Search, ArrowUpDown, Copy, Check, Sparkles, Layers, Box, Star, Sliders } from 'lucide-react';
+import { Trash2, RefreshCw, ArrowUpCircle, RotateCcw, AlertCircle, ToggleLeft, ToggleRight, Search, ArrowUpDown, Copy, Check, Sparkles, Layers, Box, Star, Sliders, FilePlus } from 'lucide-react';
 import {
   removeModFromDraft,
   updateModInDraft,
@@ -134,7 +134,7 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
   useEffect(() => {
     if (!draft?.mods) return;
     const missing = draft.mods
-      .filter(m => !m.iconUrl && !iconMap[m.slug] && !iconMap[m.projectId])
+      .filter(m => !m.custom && !m.iconUrl && !iconMap[m.slug] && !iconMap[m.projectId])
       .map(m => m.projectId || m.slug);
 
     if (missing.length === 0) return;
@@ -180,6 +180,22 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
       setBusyKey(null);
     }
   };
+
+  // Eigene Mod (.jar) wählen: wird beim Veröffentlichen in den Ordner custom-mods des Modpack-Repositorys geladen
+  const handleAddCustomMod = () => runChange('add-custom', async () => {
+    const res = await window.electronAPI.pickCustomMod();
+    if (res?.canceled) return { draft };
+    if (!res?.success) throw new Error(res?.error || 'Die Mod konnte nicht gelesen werden.');
+    const mod = res.mod;
+    const exists = draft.mods.some(m => m.slug === mod.slug);
+    const mods = exists
+      ? draft.mods.map(m => (m.slug === mod.slug ? { ...mod, side: m.side, disabled: m.disabled } : m))
+      : [...draft.mods, mod];
+    return {
+      draft: { ...draft, mods },
+      warnings: [`${mod.name} ist eine eigene Mod. Prüfe die Seite (Client, Server oder Beide), sie wird beim Veröffentlichen hochgeladen.`]
+    };
+  });
 
   const handleToggle = (mod) => runChange(`toggle:${mod.slug}`, async () => {
     return toggleModInDraft(draft, mod.slug);
@@ -386,6 +402,17 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
                   {copiedList ? <Check size={14} style={{ color: '#10b981' }} /> : <Copy size={14} />}
                   <span>{copiedList ? 'Kopiert!' : 'Modliste kopieren'}</span>
                 </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleAddCustomMod}
+                  disabled={Boolean(busyKey)}
+                  title="Eine eigene Mod (.jar) hinzufügen, die nicht von Modrinth kommt"
+                  style={{ padding: '6px 12px', fontSize: '12.5px', gap: '6px' }}
+                >
+                  {busyKey === 'add-custom' ? <RefreshCw size={14} className="spin" /> : <FilePlus size={14} />}
+                  <span>Eigene Mod hinzufügen</span>
+                </button>
                 <button className="btn-secondary" onClick={onResetDraft} disabled={Boolean(busyKey)} title="Entwurf durch die veröffentlichte Liste ersetzen" style={{ padding: '6px 12px', fontSize: '12.5px' }}>
                   <RotateCcw size={14} /> Zurücksetzen
                 </button>
@@ -545,15 +572,15 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
 
                     <div
                       className="mod-clickable-info"
-                      onClick={() => onOpenProject(mod.slug)}
-                      title="Detailseite öffnen"
+                      onClick={() => { if (!mod.custom) onOpenProject(mod.slug); }}
+                      title={mod.custom ? mod.filename : 'Detailseite öffnen'}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
                         gap: '14px',
                         flex: 1,
                         minWidth: 0,
-                        cursor: 'pointer'
+                        cursor: mod.custom ? 'default' : 'pointer'
                       }}
                     >
                       <ProjectIcon
@@ -581,6 +608,7 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
                             {mod.name}
                           </span>
                           {isDisabled && <StatusBadge color="#94a3b8">deaktiviert</StatusBadge>}
+                          {mod.custom && <StatusBadge color="#0ea5e9" title="Eigene Mod, liegt im Ordner custom-mods des Modpack-Repositorys">Eigene Mod</StatusBadge>}
                           {availableUpdates[`mods:${mod.slug}`] && <StatusBadge color="#f59e0b" title={`Neue Version verfügbar: ${mod.versionNumber} → ${availableUpdates[`mods:${mod.slug}`].versionNumber}`}>Update {availableUpdates[`mods:${mod.slug}`].versionNumber}</StatusBadge>}
                           {addedSlugs.has(mod.slug) && <StatusBadge color="#059669">neu</StatusBadge>}
                           {changedSlugs.has(mod.slug) && <StatusBadge color="var(--color-primary)">geändert</StatusBadge>}
@@ -613,7 +641,7 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
                     <button
                       className="btn-secondary"
                       style={{ padding: '6px 10px', color: availableUpdates[`mods:${mod.slug}`] ? '#f59e0b' : undefined }}
-                      disabled={Boolean(busyKey)}
+                      disabled={Boolean(busyKey) || mod.custom}
                       onClick={() => handleUpdate(mod)}
                       title={availableUpdates[`mods:${mod.slug}`] ? `Auf ${availableUpdates[`mods:${mod.slug}`].versionNumber} aktualisieren` : 'Auf die neueste passende Version heben'}
                     >

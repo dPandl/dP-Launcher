@@ -1,5 +1,19 @@
 export const releaseNotes = [
   {
+    version: '0.1.6',
+    date: '13.11.2026',
+    title: 'Eigene Mods im Modpack',
+    whatsNew: [
+      'Im Server-Admin-Entwurf lassen sich eigene Mods (.jar) hinzufügen, die nicht von Modrinth kommen',
+      'Für eigene Mods stellst du ein, ob sie für Client, Server oder beide gelten',
+      'Eigene Mods für den Client werden beim Veröffentlichen automatisch an alle Spieler verteilt, Mods für den Server gehen aufs Panel'
+    ],
+    bugFixes: [],
+    adjustments: [
+      'Die Update-Prüfung überspringt eigene Mods, sie sind im Entwurf mit „Eigene Mod“ gekennzeichnet'
+    ]
+  },
+  {
     version: '0.1.5',
     date: '13.11.2026',
     title: 'Updates auf einen Blick, Skin-Bibliothek und Server neu starten',

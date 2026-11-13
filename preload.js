@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openServerFolder: (id) => ipcRenderer.invoke('servers-open-folder', id),
   exportServer: (id, name, description, banner) => ipcRenderer.invoke('servers-export', { id, name, description, banner }),
   pickServerBanner: () => ipcRenderer.invoke('server-banner-pick'),
+  pickCustomMod: () => ipcRenderer.invoke('custom-mod-pick'),
   readBanner: (ownerId) => ipcRenderer.invoke('banner-read', ownerId),
   getFabricLoaderVersions: (gameVersion) => ipcRenderer.invoke('fabric-loader-versions', gameVersion),
   detectServerVersions: () => ipcRenderer.invoke('server-detect-versions'),

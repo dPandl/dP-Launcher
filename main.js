@@ -2512,6 +2512,11 @@ handleAdmin('modpack-publish', async (event, { bumpType = 'patch', customVersion
     const invalid = activeMods.find(mod => !isPinnedMod(mod) || !isSafeModFilename(mod.filename) || !isAllowedModUrl(mod.downloadUrl));
     if (invalid) throw new Error(`${invalid.name || invalid.slug} ist nicht sauber festgeschrieben.`);
 
+    // Eigene Mods zuerst hochladen, damit die Download-Adressen im Manifest sofort funktionieren
+    for (const customMod of activeMods.filter(mod => mod.custom)) {
+      await uploadCustomMod(config, customMod);
+    }
+
     const endpoint = `/repos/${config.owner}/${config.repo}/contents/${MANIFEST_FILE}`;
     const current = await githubRequest(`${endpoint}?ref=${encodeURIComponent(config.branch)}`);
     if (!current.ok && current.status !== 404) {
@@ -2699,6 +2704,93 @@ handleAdmin('modpack-publish', async (event, { bumpType = 'patch', customVersion
     return { success: false, error: err.message };
   }
 });
+
+// ─── Eigene Mods (nicht von Modrinth) ─────────────────────────────────────
+const CUSTOM_MOD_MAX_BYTES = 90 * 1024 * 1024;
+
+handleAdmin('custom-mod-pick', async () => {
+  const config = getGithubConfig();
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Eigene Mod wählen',
+    properties: ['openFile'],
+    filters: [{ name: 'Fabric-Mod (.jar)', extensions: ['jar'] }]
+  });
+  if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true };
+  try {
+    if (!config.owner || !config.repo) throw new Error('Es ist kein Modpack-Repository eingestellt.');
+    const filePath = result.filePaths[0];
+    const filename = path.basename(filePath);
+    if (!isSafeModFilename(filename)) throw new Error('Der Dateiname ist nicht erlaubt.');
+    const size = fs.statSync(filePath).size;
+    if (size > CUSTOM_MOD_MAX_BYTES) throw new Error('Die Datei ist größer als 90 MB und passt nicht ins GitHub-Repository.');
+    const buffer = fs.readFileSync(filePath);
+    const unzipped = unzipSync(buffer, { filter: f => f.name === 'fabric.mod.json' });
+    if (!unzipped['fabric.mod.json']) throw new Error('Das ist keine Fabric-Mod (fabric.mod.json fehlt).');
+    const data = JSON.parse(strFromU8(unzipped['fabric.mod.json']).replace(/^\uFEFF/, '').replace(/[\r\n\t]+/g, ' '));
+    const modId = String(data.id || filename.replace(/\.jar$/, '')).toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    const sha1 = crypto.createHash('sha1').update(buffer).digest('hex');
+    const environment = data.environment === 'client' ? 'client' : data.environment === 'server' ? 'server' : 'both';
+
+    fs.mkdirSync(customModsDir(), { recursive: true });
+    fs.copyFileSync(filePath, path.join(customModsDir(), filename));
+
+    return {
+      success: true,
+      mod: {
+        slug: `custom-${modId}`,
+        name: String(data.name || data.id || filename).slice(0, 80),
+        iconUrl: null,
+        side: environment,
+        projectId: `custom:${modId}`,
+        versionId: `custom-${sha1.slice(0, 12)}`,
+        versionNumber: String(data.version || 'eigene').slice(0, 40),
+        filename,
+        downloadUrl: `https://raw.githubusercontent.com/${config.owner}/${config.repo}/${config.branch}/custom-mods/${encodeURIComponent(filename)}`,
+        sha1,
+        size,
+        custom: true,
+        autoDependency: false,
+        dependencies: [],
+        addedAt: Date.now()
+      }
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Lädt die Datei einer eigenen Mod nach custom-mods/ im Repository, falls sie dort noch nicht (so) liegt
+async function uploadCustomMod(config, mod) {
+  const local = path.join(customModsDir(), mod.filename);
+  const repoPath = `custom-mods/${encodeURIComponent(mod.filename)}`;
+  const endpoint = `/repos/${config.owner}/${config.repo}/contents/${repoPath}`;
+  const current = await githubRequest(`${endpoint}?ref=${encodeURIComponent(config.branch)}`);
+  if (!current.ok && current.status !== 404) throw new Error(describeGithubError(current, config));
+
+  if (!fs.existsSync(local)) {
+    if (current.ok) return; // liegt schon im Repository (zum Beispiel von einem anderen Rechner hochgeladen)
+    throw new Error(`Die Datei von ${mod.name || mod.slug} liegt nicht mehr auf diesem Rechner. Füge die Mod im Entwurf neu hinzu.`);
+  }
+  const buffer = fs.readFileSync(local);
+  if (crypto.createHash('sha1').update(buffer).digest('hex') !== String(mod.sha1).toLowerCase()) {
+    throw new Error(`Die lokale Datei von ${mod.name || mod.slug} passt nicht zum Entwurf. Füge die Mod neu hinzu.`);
+  }
+  if (current.ok) {
+    const blobSha = crypto.createHash('sha1').update(Buffer.concat([Buffer.from(`blob ${buffer.length}\0`), buffer])).digest('hex');
+    if (current.data.sha === blobSha) return; // unverändert
+  }
+  const repoIsEmpty = !current.ok && await isGithubRepoEmpty(config);
+  const put = await githubRequest(endpoint, {
+    method: 'PUT',
+    body: {
+      message: `custom-mods: ${mod.filename}`,
+      content: buffer.toString('base64'),
+      ...(repoIsEmpty ? {} : { branch: config.branch }),
+      ...(current.ok ? { sha: current.data.sha } : {})
+    }
+  });
+  if (!put.ok) throw new Error(describeGithubError(put, config));
+}
 
 // ─── Darstellung des Servers (Name, Beschreibung, Banner) auf GitHub ──────
 const PRESENTATION_BANNER_FILE = 'server-banner.png';
@@ -4937,7 +5029,28 @@ async function reconcileUserMods(packMods, { gameVersion, loader }) {
 }
 
 // Ersetzt die Zieldatei erst nach erfolgreicher Prüfung
+// Eigene Mods: Liegt die Datei schon im lokalen Ordner (vor dem Veröffentlichen), wird sie von dort kopiert
+function customModsDir() { return path.join(serverDataDir(), 'custom-mods'); }
+
+async function localCustomModFor(url, expectedSha1) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== 'raw.githubusercontent.com' || !parsed.pathname.includes('/custom-mods/')) return null;
+    const local = path.join(customModsDir(), decodeURIComponent(path.basename(parsed.pathname)));
+    if (!fs.existsSync(local)) return null;
+    if (expectedSha1 && (await getFileSha1(local))?.toLowerCase() !== expectedSha1.toLowerCase()) return null;
+    return local;
+  } catch (_e) {
+    return null;
+  }
+}
+
 async function downloadVerified(url, targetPath, expectedSha1, onProgress) {
+  const localCustom = await localCustomModFor(url, expectedSha1);
+  if (localCustom) {
+    fs.copyFileSync(localCustom, targetPath);
+    return;
+  }
   const partPath = `${targetPath}.part`;
   try {
     await downloadFile(url, partPath, onProgress);
