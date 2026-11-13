@@ -7,7 +7,7 @@ export default function Sidebar({ currentTab, setCurrentTab, activeSeason, accou
     { id: 'play', label: 'Spielen', icon: Play },
     { id: 'servers', label: 'Server', icon: Globe },
     { id: 'guides', label: 'Anleitungen', icon: BookOpen },
-    { id: 'chat', label: 'Server-Chat', icon: MessageSquare },
+    { id: 'chat', label: 'Chat & Karte', icon: MessageSquare },
     ...(isAdmin ? [{ id: 'admin', label: 'Server-Admin', icon: ServerCog }] : []),
     { id: 'mods', label: 'Mods', icon: Package },
     { id: 'settings', label: 'Einstellungen', icon: Settings },

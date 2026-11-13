@@ -10,7 +10,9 @@ import {
   toggleResourcepackActive,
   removeShaderpackFromDraft,
   toggleShaderpackActive,
-  setDefaultShaderpack
+  setDefaultShaderpack,
+  findDraftUpdates,
+  updatePackInDraft
 } from '../../services/modpackService';
 import { ModrinthService } from '../../services/modrinthService';
 import { ProjectIcon } from '../modrinth/modrinthUi';
@@ -70,6 +72,11 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'active' | 'disabled'
   const [sortBy, setSortBy] = useState(getStoredSort); // 'name-asc' | 'name-desc' | 'date-desc' | 'date-asc'
   const [copiedList, setCopiedList] = useState(false);
+  const [availableUpdates, setAvailableUpdates] = useState({}); // 'mods:slug' -> { versionId, versionNumber }
+  const [onlyUpdates, setOnlyUpdates] = useState(false);
+  const updateCount = Object.keys(availableUpdates).length;
+  const countFor = (kind) => Object.keys(availableUpdates).filter(key => key.startsWith(`${kind}:`)).length;
+  useEffect(() => { if (updateCount === 0) setOnlyUpdates(false); }, [updateCount]);
 
   const resourcepacks = draft?.resourcepacks || [];
   const shaderpacks = draft?.shaderpacks || [];
@@ -150,6 +157,17 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
     return () => { cancelled = true; };
   }, [draft.mods]);
 
+  // Sucht im Hintergrund, ob es zu den Einträgen im Entwurf neuere Versionen gibt
+  const updateSignature = [draft?.gameVersion, draft?.loader, ...(draft?.mods || []).map(m => m.sha1), ...(draft?.resourcepacks || []).map(p => p.sha1), ...(draft?.shaderpacks || []).map(p => p.sha1)].join('|');
+  useEffect(() => {
+    if (!draft) return undefined;
+    let cancelled = false;
+    findDraftUpdates(draft)
+      .then(found => { if (!cancelled) setAvailableUpdates(found); })
+      .catch(() => { if (!cancelled) setAvailableUpdates({}); });
+    return () => { cancelled = true; };
+  }, [updateSignature]);
+
   const runChange = async (key, change) => {
     setBusyKey(key);
     try {
@@ -168,12 +186,16 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
   });
 
   const handleUpdate = (mod) => runChange(`update:${mod.slug}`, async () => {
-    const result = await updateModInDraft(draft, mod.slug);
+    const result = await updateModInDraft(draft, mod.slug, { versionId: availableUpdates[`mods:${mod.slug}`]?.versionId });
     if (!result.updated) {
       return { draft, warnings: [`${mod.name} ist bereits auf der neuesten passenden Version.`] };
     }
     return result;
   });
+
+  const handleUpdatePack = (kind, pack) => runChange(`update-pack:${kind}:${pack.slug}`, async () => ({
+    draft: await updatePackInDraft(draft, kind, pack.slug, availableUpdates[`${kind}:${pack.slug}`].versionId)
+  }));
 
   const handleToggleResourcepack = (pack) => runChange(`toggle-rp:${pack.slug}`, async () => ({
     draft: toggleResourcepackActive(draft, pack.projectId || pack.slug)
@@ -203,6 +225,7 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
     }));
 
     const filtered = rawMods.filter(mod => {
+      if (onlyUpdates && !availableUpdates[`mods:${mod.slug}`]) return false;
       if (statusFilter === 'active' && mod.disabled) return false;
       if (statusFilter === 'disabled' && !mod.disabled) return false;
 
@@ -235,7 +258,7 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
       }
       return 0;
     });
-  }, [draft?.mods, statusFilter, searchQuery, sortBy]);
+  }, [draft?.mods, statusFilter, searchQuery, sortBy, onlyUpdates, availableUpdates]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, height: '100%', overflow: 'hidden' }}>
@@ -452,6 +475,22 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
                   </button>
                 </div>
               )}
+              {countFor('mods') > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setOnlyUpdates(v => !v)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', fontSize: '12.5px', fontFamily: 'inherit', cursor: 'pointer', borderRadius: '10px',
+                    border: '1px solid ' + (onlyUpdates ? 'rgba(245, 158, 11, 0.6)' : 'var(--border-card)'),
+                    background: onlyUpdates ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-well)',
+                    color: onlyUpdates ? '#f59e0b' : 'var(--text-muted)', fontWeight: onlyUpdates ? 700 : 500
+                  }}
+                  title="Nur Einträge mit verfügbarem Update anzeigen"
+                >
+                  <ArrowUpCircle size={14} />
+                  Nur Updates ({countFor('mods')})
+                </button>
+              )}
             </div>
 
             {warnings.length > 0 && (
@@ -542,6 +581,7 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
                             {mod.name}
                           </span>
                           {isDisabled && <StatusBadge color="#94a3b8">deaktiviert</StatusBadge>}
+                          {availableUpdates[`mods:${mod.slug}`] && <StatusBadge color="#f59e0b" title={`Neue Version verfügbar: ${mod.versionNumber} → ${availableUpdates[`mods:${mod.slug}`].versionNumber}`}>Update {availableUpdates[`mods:${mod.slug}`].versionNumber}</StatusBadge>}
                           {addedSlugs.has(mod.slug) && <StatusBadge color="#059669">neu</StatusBadge>}
                           {changedSlugs.has(mod.slug) && <StatusBadge color="var(--color-primary)">geändert</StatusBadge>}
                           {mod.autoDependency && (
@@ -572,10 +612,10 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
 
                     <button
                       className="btn-secondary"
-                      style={{ padding: '6px 10px' }}
+                      style={{ padding: '6px 10px', color: availableUpdates[`mods:${mod.slug}`] ? '#f59e0b' : undefined }}
                       disabled={Boolean(busyKey)}
                       onClick={() => handleUpdate(mod)}
-                      title="Auf die neueste passende Version heben"
+                      title={availableUpdates[`mods:${mod.slug}`] ? `Auf ${availableUpdates[`mods:${mod.slug}`].versionNumber} aktualisieren` : 'Auf die neueste passende Version heben'}
                     >
                       {busyKey === `update:${mod.slug}` ? <RefreshCw size={13} className="spin" /> : <ArrowUpCircle size={13} />}
                     </button>
@@ -631,10 +671,26 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
                   Werden automatisch in das resourcepacks/-Verzeichnis der Clients synchronisiert.
                 </span>
               </div>
+              {countFor('resourcepacks') > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setOnlyUpdates(v => !v)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', fontSize: '12.5px', fontFamily: 'inherit', cursor: 'pointer', borderRadius: '10px',
+                    border: '1px solid ' + (onlyUpdates ? 'rgba(245, 158, 11, 0.6)' : 'var(--border-card)'),
+                    background: onlyUpdates ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-well)',
+                    color: onlyUpdates ? '#f59e0b' : 'var(--text-muted)', fontWeight: onlyUpdates ? 700 : 500
+                  }}
+                  title="Nur Einträge mit verfügbarem Update anzeigen"
+                >
+                  <ArrowUpCircle size={14} />
+                  Nur Updates ({countFor('resourcepacks')})
+                </button>
+              )}
             </div>
 
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {resourcepacks.map(pack => {
+              {resourcepacks.filter(pack => !onlyUpdates || availableUpdates[`resourcepacks:${pack.slug}`]).map(pack => {
                 const isDisabled = Boolean(pack.disabled);
                 const sizeLabel = formatBytes(pack.size);
 
@@ -710,6 +766,7 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
                           >
                             {pack.name || pack.slug}
                           </span>
+                          {availableUpdates[`resourcepacks:${pack.slug}`] && <StatusBadge color="#f59e0b" title={`Neue Version verfügbar: ${pack.versionNumber || 'installiert'} → ${availableUpdates[`resourcepacks:${pack.slug}`].versionNumber}`}>Update {availableUpdates[`resourcepacks:${pack.slug}`].versionNumber}</StatusBadge>}
                           {isDisabled ? (
                             <StatusBadge color="#94a3b8">deaktiviert</StatusBadge>
                           ) : (
@@ -722,6 +779,17 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
                       </div>
                     </div>
 
+                    {availableUpdates[`resourcepacks:${pack.slug}`] && (
+                      <button
+                        className="btn-secondary"
+                        style={{ padding: '6px 10px', color: '#f59e0b' }}
+                        disabled={Boolean(busyKey)}
+                        onClick={() => handleUpdatePack('resourcepacks', pack)}
+                        title={`Auf ${availableUpdates[`resourcepacks:${pack.slug}`].versionNumber} aktualisieren`}
+                      >
+                        {busyKey === `update-pack:resourcepacks:${pack.slug}` ? <RefreshCw size={13} className="spin" /> : <ArrowUpCircle size={13} />}
+                      </button>
+                    )}
                     <button
                       className="btn-secondary"
                       style={{ padding: '6px 10px', color: '#dc2626' }}
@@ -760,10 +828,26 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
                   Shader werden auf die Clients heruntergeladen. Du kannst festlegen, welcher Shader standardmäßig aktiv sein soll.
                 </span>
               </div>
+              {countFor('shaderpacks') > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setOnlyUpdates(v => !v)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', fontSize: '12.5px', fontFamily: 'inherit', cursor: 'pointer', borderRadius: '10px',
+                    border: '1px solid ' + (onlyUpdates ? 'rgba(245, 158, 11, 0.6)' : 'var(--border-card)'),
+                    background: onlyUpdates ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-well)',
+                    color: onlyUpdates ? '#f59e0b' : 'var(--text-muted)', fontWeight: onlyUpdates ? 700 : 500
+                  }}
+                  title="Nur Einträge mit verfügbarem Update anzeigen"
+                >
+                  <ArrowUpCircle size={14} />
+                  Nur Updates ({countFor('shaderpacks')})
+                </button>
+              )}
             </div>
 
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {shaderpacks.map(pack => {
+              {shaderpacks.filter(pack => !onlyUpdates || availableUpdates[`shaderpacks:${pack.slug}`]).map(pack => {
                 const isDisabled = Boolean(pack.disabled);
                 const isDefault = draft?.defaultShader === pack.filename;
                 const sizeLabel = formatBytes(pack.size);
@@ -840,6 +924,7 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
                           >
                             {pack.name || pack.slug}
                           </span>
+                          {availableUpdates[`shaderpacks:${pack.slug}`] && <StatusBadge color="#f59e0b" title={`Neue Version verfügbar: ${pack.versionNumber || 'installiert'} → ${availableUpdates[`shaderpacks:${pack.slug}`].versionNumber}`}>Update {availableUpdates[`shaderpacks:${pack.slug}`].versionNumber}</StatusBadge>}
                           {isDefault && (
                             <span
                               className="badge"
@@ -880,6 +965,17 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
                       </button>
                     )}
 
+                    {availableUpdates[`shaderpacks:${pack.slug}`] && (
+                      <button
+                        className="btn-secondary"
+                        style={{ padding: '6px 10px', color: '#f59e0b' }}
+                        disabled={Boolean(busyKey)}
+                        onClick={() => handleUpdatePack('shaderpacks', pack)}
+                        title={`Auf ${availableUpdates[`shaderpacks:${pack.slug}`].versionNumber} aktualisieren`}
+                      >
+                        {busyKey === `update-pack:shaderpacks:${pack.slug}` ? <RefreshCw size={13} className="spin" /> : <ArrowUpCircle size={13} />}
+                      </button>
+                    )}
                     <button
                       className="btn-secondary"
                       style={{ padding: '6px 10px', color: '#dc2626' }}

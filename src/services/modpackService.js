@@ -201,7 +201,19 @@ export function diffManifests(published, draft) {
       fromDisabled: Boolean(before.get(m.slug).disabled)
     }));
 
-  return { added, removed, changed, total: added.length + removed.length + changed.length };
+  // Ressourcen- und Shaderpakete, getrennt von den Mods
+  const packs = [];
+  for (const [key, kind] of [['resourcepacks', 'Ressourcenpaket'], ['shaderpacks', 'Shader']]) {
+    const oldMap = new Map((published?.[key] || []).map(p => [p.slug, p]));
+    const newList = (draft?.[key] || []).filter(p => !p.disabled);
+    const newMap = new Map(newList.map(p => [p.slug, p]));
+    newList.filter(p => !oldMap.has(p.slug)).forEach(p => packs.push({ type: 'added', kind, name: p.name || p.slug, slug: p.slug, versionNumber: p.versionNumber }));
+    newList.filter(p => oldMap.has(p.slug) && oldMap.get(p.slug).versionId !== p.versionId)
+      .forEach(p => packs.push({ type: 'changed', kind, name: p.name || p.slug, slug: p.slug, fromVersion: oldMap.get(p.slug).versionNumber || '', versionNumber: p.versionNumber }));
+    [...oldMap.values()].filter(p => !newMap.has(p.slug)).forEach(p => packs.push({ type: 'removed', kind, name: p.name || p.slug, slug: p.slug }));
+  }
+
+  return { added, removed, changed, packs, total: added.length + removed.length + changed.length + packs.length };
 }
 
 function createEmptyDraft(manifest) {
@@ -371,4 +383,50 @@ export async function createDraftFromManifest(manifest) {
     };
   }
   return migrateLegacyManifest(manifest);
+}
+
+// Sucht zu Mods, Ressourcen- und Shaderpaketen im Entwurf neuere Versionen (über die SHA-1 der Dateien).
+// Ergebnis: { 'mods:slug': { versionId, versionNumber } } nur für Einträge mit Update.
+export async function findDraftUpdates(draft) {
+  const groups = [
+    { key: 'mods', entries: draft.mods || [], loaders: [draft.loader || 'fabric'] },
+    { key: 'resourcepacks', entries: draft.resourcepacks || [], loaders: ['minecraft'] },
+    { key: 'shaderpacks', entries: draft.shaderpacks || [], loaders: ['iris', 'optifine', 'canvas', 'vanilla'] }
+  ].map(group => ({ ...group, entries: group.entries.filter(e => e.sha1) }));
+
+  const allHashes = groups.flatMap(g => g.entries.map(e => e.sha1));
+  if (allHashes.length === 0) return {};
+  const current = await ModrinthService.getVersionsByHashes(allHashes);
+
+  const result = {};
+  for (const group of groups) {
+    if (group.entries.length === 0) continue;
+    const latest = await ModrinthService.getLatestVersionsByHashes(group.entries.map(e => e.sha1), {
+      loaders: group.loaders,
+      gameVersions: draft.gameVersion ? [draft.gameVersion] : []
+    });
+    for (const entry of group.entries) {
+      const next = latest[entry.sha1];
+      const now = current[entry.sha1];
+      if (!next || next.id === entry.versionId) continue;
+      if (now && new Date(next.date_published) <= new Date(now.date_published)) continue;
+      if (now?.version_type === 'release' && next.version_type !== 'release') continue;
+      result[`${group.key}:${entry.slug}`] = { versionId: next.id, versionNumber: next.version_number };
+    }
+  }
+  return result;
+}
+
+// Hebt ein Ressourcen- oder Shaderpaket auf eine neue Version, Aktiv-Status bleibt erhalten
+export async function updatePackInDraft(draft, kind, slug, versionId) {
+  const list = draft[kind] || [];
+  const current = list.find(p => p.slug === slug);
+  if (!current) throw new Error(`${slug} ist nicht im Entwurf`);
+  const project = await ModrinthService.getProject(current.projectId || slug);
+  const version = await ModrinthService.getVersion(versionId);
+  const entry = { ...buildPackEntry(project, version), active: current.active, disabled: current.disabled, addedAt: current.addedAt };
+  if (current.disabled === undefined) delete entry.disabled;
+  const next = { ...draft, [kind]: list.map(p => (p.slug === slug ? entry : p)) };
+  if (kind === 'shaderpacks' && draft.defaultShader === current.filename) next.defaultShader = entry.filename;
+  return next;
 }

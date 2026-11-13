@@ -8,7 +8,7 @@ import { getManifestMods } from '../../modpackUtils.js';
 
 const MAX_SHOWN_REASONS = 3;
 
-export default function ModrinthStoreView({ manifest, hideHeader = false, openRequest = null }) {
+export default function ModrinthStoreView({ manifest, hideHeader = false, openRequest = null, onReturnFromRequest = null }) {
   const [busyKey, setBusyKey] = useState(null);
   const [installedKeys, setInstalledKeys] = useState({});
   const [userMods, setUserMods] = useState([]);
@@ -258,6 +258,7 @@ export default function ModrinthStoreView({ manifest, hideHeader = false, openRe
         renderAction={renderAction}
         renderVersionAction={renderVersionAction}
         openRequest={openRequest}
+        onReturnFromRequest={onReturnFromRequest}
       />
     </div>
   );

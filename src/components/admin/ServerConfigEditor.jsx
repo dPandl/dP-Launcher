@@ -7,6 +7,9 @@ import {
 import { BisectService } from '../../services/bisectService';
 import { appConfirm, appAlert } from '../../utils/appDialog';
 
+// Zuletzt geladene Dateilisten, damit beim erneuten Öffnen sofort etwas da ist
+const configListCache = new Map();
+
 export default function ServerConfigEditor({
   selectedServer,
   bisectConfig,
@@ -15,6 +18,7 @@ export default function ServerConfigEditor({
 }) {
   const [configFiles, setConfigFiles] = useState([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [filterQuery, setFilterQuery] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
 
@@ -40,25 +44,29 @@ export default function ServerConfigEditor({
   // Lädt die Liste aller Config-Dateien vom Server
   const loadFileList = async () => {
     if (!selectedServer || !isConnected) return;
-    setIsLoadingList(true);
+    const serverKey = selectedServer.attributes.identifier;
+    const cached = configListCache.get(serverKey);
+    if (cached) setConfigFiles(cached);
+    setIsLoadingList(!cached);
+    setIsLoadingMore(true);
+    let autoSelected = false;
     try {
-      const files = await BisectService.listConfigFiles(
-        selectedServer.attributes.identifier,
-        bisectConfig
-      );
-      setConfigFiles(files);
-
-      // Falls noch keine Datei ausgewählt ist, bevorzugt server.properties wählen
-      if (!selectedFile && files.length > 0) {
-        const preferred = files.find(f => f.name === 'server.properties') || files[0];
-        if (preferred) {
-          loadFile(preferred);
+      const files = await BisectService.listConfigFiles(serverKey, bisectConfig, (partial) => {
+        setConfigFiles(partial);
+        setIsLoadingList(false);
+        // Falls noch keine Datei ausgewählt ist, bevorzugt server.properties wählen
+        if (!selectedFile && !autoSelected && partial.length > 0) {
+          autoSelected = true;
+          loadFile(partial.find(f => f.name === 'server.properties') || partial[0]);
         }
-      }
+      });
+      configListCache.set(serverKey, files.slice().sort((a, b) => (a.category || '').localeCompare(b.category || '', 'de') || a.name.localeCompare(b.name, 'de')));
+      setConfigFiles(configListCache.get(serverKey));
     } catch (err) {
       console.error('Fehler beim Laden der Config-Liste:', err);
     } finally {
       setIsLoadingList(false);
+      setIsLoadingMore(false);
     }
   };
 
@@ -336,7 +344,7 @@ export default function ServerConfigEditor({
               title="Dateiliste aktualisieren"
               style={{ padding: '7px 10px' }}
             >
-              <RefreshCw size={13} className={isLoadingList ? 'spin' : ''} />
+              <RefreshCw size={13} className={isLoadingList || isLoadingMore ? 'spin' : ''} />
             </button>
           </div>
 

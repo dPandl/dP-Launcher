@@ -17,7 +17,7 @@ export default function Skin3DViewer({ skinUrl, modelVariant = 'classic', width 
     });
 
     viewer.autoRotate = true;
-    viewer.autoRotateSpeed = 1.0;
+    viewer.autoRotateSpeed = 0.4;
     viewer.animation = new IdleAnimation();
 
     // Zoom und Kameraposition anpassen

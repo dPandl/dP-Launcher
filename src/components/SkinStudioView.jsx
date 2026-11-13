@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Check, Search, Sparkles, RefreshCw, AlertCircle, Trash2 } from 'lucide-react';
 import Skin3DViewer from './Skin3DViewer';
-import { PRESET_SKINS, SKIN_CATEGORIES } from '../services/skinLibrary';
+import { PRESET_SKINS, SKIN_CATEGORIES, getSeasonalSkins, getGamingSkins } from '../services/skinLibrary';
+import { getCurrentSeason } from '../services/seasonManager';
 import { appAlert } from '../utils/appDialog';
 
 export default function SkinStudioView({ account, onAccountChange }) {
@@ -43,9 +44,12 @@ export default function SkinStudioView({ account, onAccountChange }) {
     if (activeCategory === 'history') {
       return skinHistory;
     }
+    const seasonal = getSeasonalSkins(getCurrentSeason());
     if (activeCategory === 'all') {
-      return PRESET_SKINS;
+      return [...seasonal, ...getGamingSkins(), ...PRESET_SKINS];
     }
+    if (activeCategory === 'seasonal') return seasonal;
+    if (activeCategory === 'gaming') return getGamingSkins();
     return PRESET_SKINS.filter(s => s.category === activeCategory);
   };
 

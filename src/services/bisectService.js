@@ -296,63 +296,54 @@ export const BisectService = {
   },
 
   // Durchsucht rekursiv den /config-Ordner und das Hauptverzeichnis nach Konfigurationsdateien
-  async listConfigFiles(serverId, configOverride = null) {
+  // Config-Dateien des Servers. Mit onPartial erscheinen die ersten Dateien sofort,
+  // die Unterordner von /config werden danach (drei gleichzeitig) nachgeladen.
+  async listConfigFiles(serverId, configOverride = null, onPartial = null) {
+    const CONFIG_FILE = /\.(ya?ml|json|toml|properties|txt|cfg|conf)$/i;
+    const isDirectory = (item) => Boolean(item.mode && item.mode.startsWith('d'));
+    const byCategory = (a, b) => (a.category || '').localeCompare(b.category || '', 'de') || a.name.localeCompare(b.name, 'de');
     const configFiles = [];
+    const emit = () => { if (onPartial) onPartial([...configFiles].sort(byCategory)); };
 
-    // 1. server.properties und Systemdateien im Root
-    try {
-      const rootFiles = await this.listFiles(serverId, '/', configOverride);
-      for (const f of rootFiles) {
-        if (f.name === 'server.properties' || f.name.endsWith('.properties') || f.name === 'ops.json' || f.name === 'whitelist.json') {
-          configFiles.push({
-            name: f.name,
-            path: f.name,
-            size: f.size,
-            category: 'Server-Hauptdateien'
-          });
-        }
+    // 1. Hauptdateien im Root und der /config-Ordner gleichzeitig
+    const [rootFiles, configEntries] = await Promise.all([
+      this.listFiles(serverId, '/', configOverride).catch(e => { console.warn('Root-Dateien konnten nicht geladen werden:', e); return []; }),
+      this.listFiles(serverId, '/config', configOverride).catch(e => { console.warn('/config Ordner konnte nicht geladen werden:', e); return []; })
+    ]);
+
+    for (const f of rootFiles) {
+      if (f.name === 'server.properties' || f.name.endsWith('.properties') || f.name === 'ops.json' || f.name === 'whitelist.json') {
+        configFiles.push({ name: f.name, path: f.name, size: f.size, category: 'Server-Hauptdateien' });
       }
-    } catch (e) {
-      console.warn('Root-Dateien konnten nicht geladen werden:', e);
     }
+    const folders = [];
+    for (const item of configEntries) {
+      if (isDirectory(item)) folders.push(item.name);
+      else if (CONFIG_FILE.test(item.name)) {
+        configFiles.push({ name: item.name, path: `config/${item.name}`, size: item.size, category: 'Allgemeine Mod-Configs' });
+      }
+    }
+    emit();
 
-    // 2. /config-Ordner durchsuchen
-    try {
-      const entries = await this.listFiles(serverId, '/config', configOverride);
-      for (const item of entries) {
-        const isDir = item.mode && item.mode.startsWith('d');
-        if (!isDir) {
-          if (/\.(ya?ml|json|toml|properties|txt|cfg|conf)$/i.test(item.name)) {
-            configFiles.push({
-              name: item.name,
-              path: `config/${item.name}`,
-              size: item.size,
-              category: 'Allgemeine Mod-Configs'
-            });
-          }
-        } else {
-          // Unterordner
-          try {
-            const subEntries = await this.listFiles(serverId, `/config/${item.name}`, configOverride);
-            for (const subItem of subEntries) {
-              const subIsDir = subItem.mode && subItem.mode.startsWith('d');
-              if (!subIsDir && /\.(ya?ml|json|toml|properties|txt|cfg|conf)$/i.test(subItem.name)) {
-                configFiles.push({
-                  name: subItem.name,
-                  path: `config/${item.name}/${subItem.name}`,
-                  size: subItem.size,
-                  category: item.name
-                });
-              }
+    // 2. Unterordner von /config, drei gleichzeitig (das Panel begrenzt Anfragen)
+    let next = 0;
+    const worker = async () => {
+      while (next < folders.length) {
+        const folder = folders[next++];
+        try {
+          const subEntries = await this.listFiles(serverId, `/config/${folder}`, configOverride);
+          for (const subItem of subEntries) {
+            if (!isDirectory(subItem) && CONFIG_FILE.test(subItem.name)) {
+              configFiles.push({ name: subItem.name, path: `config/${folder}/${subItem.name}`, size: subItem.size, category: folder });
             }
-          } catch (errSub) {
-            console.warn(`Unterordner config/${item.name} konnte nicht geladen werden:`, errSub);
           }
+          emit();
+        } catch (errSub) {
+          console.warn(`Unterordner config/${folder} konnte nicht geladen werden:`, errSub);
         }
       }
-    } catch (e) {
-      console.warn('/config Ordner konnte nicht geladen werden:', e);
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, folders.length) }, worker));
 
     return configFiles;
   },

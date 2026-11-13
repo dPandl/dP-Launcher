@@ -14,6 +14,16 @@ async function fetchJson(path, errorMessage) {
   return await response.json();
 }
 
+async function postJson(path, body, errorMessage) {
+  const response = await fetch(`${MODRINTH_API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'User-Agent': USER_AGENT, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) throw new Error(`${errorMessage}: HTTP ${response.status}`);
+  return await response.json();
+}
+
 // Client/Server-Filter wie auf modrinth.com: Nur eine Seite gewählt heißt "läuft nur dort"
 function buildEnvironmentFacets(environments) {
   const client = environments.includes('client');
@@ -162,6 +172,24 @@ export const ModrinthService = {
     });
     if (!response.ok) throw new Error(`Versionen für ${slugOrId} nicht gefunden`);
     return await response.json();
+  },
+
+  /**
+   * Ordnet Datei-Hashes (SHA-1) ihren Versionen zu: { hash: version }
+   */
+  async getVersionsByHashes(hashes) {
+    if (hashes.length === 0) return {};
+    return postJson('/version_files', { hashes, algorithm: 'sha1' }, 'Versionen nicht ladbar');
+  },
+
+  /**
+   * Neueste Version zu jedem Datei-Hash, passend zu Loadern und Spielversionen: { hash: version }
+   */
+  async getLatestVersionsByHashes(hashes, { loaders = [], gameVersions = [] } = {}) {
+    if (hashes.length === 0) return {};
+    return postJson('/version_files/update', {
+      hashes, algorithm: 'sha1', loaders, ...(gameVersions.length ? { game_versions: gameVersions } : {})
+    }, 'Updates nicht ladbar');
   },
 
   /**

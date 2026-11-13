@@ -14,13 +14,20 @@ import {
   Trash2,
   Shirt,
   Settings2,
-  UserCheck
+  UserCheck,
+  Plus,
+  Pencil,
+  ArrowLeft,
+  ExternalLink
 } from 'lucide-react';
 import Skin3DViewer from './Skin3DViewer';
-import { PRESET_SKINS, SKIN_CATEGORIES } from '../services/skinLibrary';
-import { appAlert, appConfirm } from '../utils/appDialog';
+import SkinHead from './common/SkinHead';
+import { detectSkinVariant } from '../utils/skinVariant';
+import { PRESET_SKINS, SKIN_CATEGORIES, SEASON_LABELS, getSeasonalSkins, getGamingSkins } from '../services/skinLibrary';
+import { getCurrentSeason } from '../services/seasonManager';
+import { appAlert, appConfirm, appPrompt } from '../utils/appDialog';
 
-const buildAccountSkin = (acc) => {
+const buildAccountSkin = (acc, info = null) => {
   if (!acc) return null;
   const identifier = acc.uuid || acc.name;
   return {
@@ -31,7 +38,7 @@ const buildAccountSkin = (acc) => {
     uuid: acc.uuid,
     textureUrl: `https://crafthead.net/skin/${identifier}`,
     helmUrl: `https://crafthead.net/helm/${identifier}`,
-    variant: acc.skinVariant || 'classic',
+    variant: info?.variant || acc.skinVariant || 'classic',
     isCurrent: true
   };
 };
@@ -47,7 +54,24 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
   const [copiedUuid, setCopiedUuid] = useState(false);
 
   // Skin Studio State
-  const accountSkin = buildAccountSkin(account);
+  const [currentSkinInfo, setCurrentSkinInfo] = useState(null); // { variant } laut Mojang
+  const [customSkins, setCustomSkins] = useState([]);
+  const season = getCurrentSeason();
+  // Classic oder Slim der mitgelieferten Skins, aus den Pixeln der Textur erkannt
+  const [detectedVariants, setDetectedVariants] = useState({});
+  const withVariant = (list) => list.map(skin => (detectedVariants[skin.id] ? { ...skin, variant: detectedVariants[skin.id] } : skin));
+  const seasonalSkins = withVariant(getSeasonalSkins(season));
+  const gamingSkins = withVariant(getGamingSkins());
+
+  useEffect(() => {
+    let cancelled = false;
+    [...getSeasonalSkins(season), ...getGamingSkins()].filter(skin => skin.detectVariant).forEach(async (skin) => {
+      const detected = await detectSkinVariant(skin.dataUrl);
+      if (detected && !cancelled) setDetectedVariants(prev => (prev[skin.id] === detected ? prev : { ...prev, [skin.id]: detected }));
+    });
+    return () => { cancelled = true; };
+  }, [season]);
+  const accountSkin = buildAccountSkin(account, currentSkinInfo);
   const [activeCategory, setActiveCategory] = useState('all');
   const [selectedSkin, setSelectedSkin] = useState(() => buildAccountSkin(account) || PRESET_SKINS[0]);
   const [searchUsername, setSearchUsername] = useState('');
@@ -69,6 +93,37 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
       });
     }
   }, [account?.name, account?.uuid]);
+
+  // Welches Modell (Classic oder Slim) der aktuelle Skin hat, bei Mojang nachfragen
+  useEffect(() => {
+    let cancelled = false;
+    setCurrentSkinInfo(null);
+    if (!account) return undefined;
+    (async () => {
+      let info = null;
+      const res = await window.electronAPI?.getCurrentSkin?.();
+      if (res?.success) {
+        info = { variant: res.variant };
+      } else {
+        const detected = await detectSkinVariant(`https://crafthead.net/skin/${account.uuid || account.name}`);
+        if (detected) info = { variant: detected };
+      }
+      if (!cancelled && info) setCurrentSkinInfo(info);
+    })();
+    return () => { cancelled = true; };
+  }, [account?.uuid, account?.name, account?.skinUrl]);
+
+  // Zeigt gerade der aktuelle Skin, bekommt er sofort das richtige Modell
+  useEffect(() => {
+    if (!currentSkinInfo || !account || !selectedSkin?.isCurrent) return;
+    setSelectedSkin(buildAccountSkin(account, currentSkinInfo));
+    setModelVariant(currentSkinInfo.variant);
+  }, [currentSkinInfo]);
+
+  // Eigene Skins laden
+  useEffect(() => {
+    window.electronAPI?.listCustomSkins?.().then(list => { if (list) setCustomSkins(list); });
+  }, []);
 
   // Skin-Historie laden
   useEffect(() => {
@@ -94,13 +149,18 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
 
   // Kategorien inklusive 'Historie'
   const categories = [
-    ...SKIN_CATEGORIES,
+    ...SKIN_CATEGORIES.map(cat => (cat.id === 'seasonal' ? { ...cat, label: `${SEASON_LABELS[season] || 'Saisonal'}-Skins` } : cat)),
+    { id: 'custom', label: `Eigene Skins (${customSkins.length})` },
     { id: 'history', label: `Bisherige Skins (${skinHistory.length})` }
   ];
 
   // Gefilterte Skins: Aktueller Skin steht bei 'all' und 'history' immer griffbereit an erster Stelle!
   const getDisplaySkins = () => {
-    const mySkin = buildAccountSkin(account);
+    const mySkin = buildAccountSkin(account, currentSkinInfo);
+
+    if (activeCategory === 'custom') {
+      return customSkins.map(skin => ({ ...skin, isCustom: true, description: 'Eigener Skin' }));
+    }
 
     if (activeCategory === 'history') {
       if (skinHistory.length === 0 && mySkin) {
@@ -110,8 +170,11 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
     }
 
     if (activeCategory === 'all') {
-      return mySkin ? [mySkin, ...PRESET_SKINS] : PRESET_SKINS;
+      return mySkin ? [mySkin, ...seasonalSkins, ...gamingSkins, ...PRESET_SKINS] : [...seasonalSkins, ...gamingSkins, ...PRESET_SKINS];
     }
+
+    if (activeCategory === 'seasonal') return seasonalSkins;
+    if (activeCategory === 'gaming') return gamingSkins;
 
     return PRESET_SKINS.filter(s => s.category === activeCategory);
   };
@@ -195,6 +258,11 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
           dataUrl: fileInfo.dataUrl,
           variant: modelVariant
         };
+        const detected = await detectSkinVariant(fileInfo.dataUrl);
+        if (detected) {
+          localSkin.variant = detected;
+          setModelVariant(detected);
+        }
         setSelectedSkin(localSkin);
         setSuccessMessage('Skin geladen! Klicke auf "Skin anwenden".');
       }
@@ -216,6 +284,82 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
       variant: 'classic'
     };
     setSelectedSkin(newSkin);
+    detectSkinVariant(`https://crafthead.net/skin/${name}`).then(detected => {
+      if (!detected) return;
+      setSelectedSkin(prev => (prev?.id === newSkin.id ? { ...prev, variant: detected } : prev));
+      setModelVariant(detected);
+    });
+  };
+
+  // Modell umschalten; bei eigenen Skins wird es mitgespeichert
+  const handleVariantChange = async (variant) => {
+    setModelVariant(variant);
+    if (selectedSkin?.isCustom) {
+      const res = await window.electronAPI.updateCustomSkin({ id: selectedSkin.id, variant });
+      if (res?.success) {
+        setCustomSkins(res.skins);
+        setSelectedSkin(prev => ({ ...prev, variant }));
+      }
+    }
+  };
+
+  // Eigene Skins: PNG wählen, benennen, speichern
+  const handleAddCustomSkin = async () => {
+    const fileInfo = await window.electronAPI?.selectSkinFile();
+    if (!fileInfo?.dataUrl) return;
+    const detected = await detectSkinVariant(fileInfo.dataUrl);
+    const suggested = (fileInfo.filePath || '').split(/[\\/]/).pop().replace(/\.png$/i, '');
+    const name = await appPrompt('Wie soll der Skin heißen?', {
+      title: 'Skin speichern',
+      value: suggested,
+      placeholder: 'z. B. Mein Herbst-Skin',
+      confirmLabel: 'Speichern'
+    });
+    if (!name || !name.trim()) return;
+    const res = await window.electronAPI.addCustomSkin({ name, variant: detected || 'classic', dataUrl: fileInfo.dataUrl });
+    if (!res?.success) {
+      appAlert(res?.error || 'Der Skin konnte nicht gespeichert werden.', { warning: true });
+      return;
+    }
+    setCustomSkins(res.skins);
+    setActiveCategory('custom');
+    setSelectedSkin({ ...res.skin, isCustom: true, description: 'Eigener Skin' });
+    setModelVariant(res.skin.variant);
+  };
+
+  const handleRenameCustomSkin = async (e, skin) => {
+    e.stopPropagation();
+    const name = await appPrompt('Neuer Name für den Skin:', { title: 'Skin umbenennen', value: skin.name, confirmLabel: 'Umbenennen' });
+    if (!name || !name.trim() || name.trim() === skin.name) return;
+    const res = await window.electronAPI.updateCustomSkin({ id: skin.id, name });
+    if (!res?.success) {
+      appAlert(res?.error || 'Das Umbenennen hat nicht geklappt.', { warning: true });
+      return;
+    }
+    setCustomSkins(res.skins);
+    setSelectedSkin(prev => (prev?.id === skin.id ? { ...prev, name: name.trim() } : prev));
+  };
+
+  const handleDeleteCustomSkin = async (e, skin) => {
+    e.stopPropagation();
+    const sure = await appConfirm(`"${skin.name}" aus deinen eigenen Skins löschen? Dein aktiver Skin im Spiel bleibt unverändert.`, {
+      title: 'Skin löschen?',
+      confirmLabel: 'Löschen',
+      cancelLabel: 'Abbrechen',
+      danger: true
+    });
+    if (!sure) return;
+    const res = await window.electronAPI.deleteCustomSkin(skin.id);
+    if (!res?.success) {
+      appAlert(res?.error || 'Der Skin konnte nicht gelöscht werden.', { warning: true });
+      return;
+    }
+    setCustomSkins(res.skins);
+    if (selectedSkin?.id === skin.id) {
+      const fallback = accountSkin || PRESET_SKINS[0];
+      setSelectedSkin(fallback);
+      setModelVariant(fallback.variant || 'classic');
+    }
   };
 
   // Skin aktivieren (Mojang / Launcher)
@@ -537,7 +681,7 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
             <div className="segmented-control" style={{ width: '100%', boxSizing: 'border-box' }}>
               <button
                 type="button"
-                onClick={() => setModelVariant('classic')}
+                onClick={() => handleVariantChange('classic')}
                 className={`segmented-control-btn ${modelVariant === 'classic' ? 'active' : ''}`}
                 style={{ flex: 1, justifyContent: 'center' }}
               >
@@ -545,7 +689,7 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
               </button>
               <button
                 type="button"
-                onClick={() => setModelVariant('slim')}
+                onClick={() => handleVariantChange('slim')}
                 className={`segmented-control-btn ${modelVariant === 'slim' ? 'active' : ''}`}
                 style={{ flex: 1, justifyContent: 'center' }}
               >
@@ -608,7 +752,8 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
                         setModelVariant(accountSkin.variant || 'classic');
                       }}
                     >
-                      <span>← Zurück zu meinem Skin ({account.name})</span>
+                      <ArrowLeft size={13} />
+                      <span>Zurück zu meinem Skin ({account.name})</span>
                     </button>
                   )}
                 </>
@@ -641,6 +786,16 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
               <button type="submit" className="btn-secondary" style={{ padding: '6px 14px', fontSize: '12px' }}>
                 Laden
               </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: '6px 14px', fontSize: '12px', gap: '6px' }}
+                onClick={() => window.electronAPI?.openExternal('https://de.namemc.com/minecraft-skins/trending/weekly')}
+                title="Öffnet die Wochen-Trends von NameMC im Browser. Skins lädst du dort als PNG herunter und fügst sie unter „Eigene Skins“ hinzu."
+              >
+                <ExternalLink size={13} />
+                <span>Trends auf NameMC</span>
+              </button>
             </form>
 
             {/* Kategorie-Filter Tabs */}
@@ -664,10 +819,31 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
                 <div className="glass-card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)', fontSize: '13.5px' }}>
                   {activeCategory === 'history'
                     ? 'Noch keine bisherigen Skins in der Historie. Sobald du einen Skin anwendest, wird er hier automatisch gespeichert!'
-                    : 'Keine Skins gefunden.'}
+                    : activeCategory === 'custom'
+                      ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                          <span>Hier landen deine eigenen Skin-Dateien. Lade eine PNG hoch, gib ihr einen Namen und wechsle jederzeit zu ihr.</span>
+                          <button type="button" className="btn-primary" onClick={handleAddCustomSkin} style={{ padding: '8px 16px', fontSize: '13px' }}>
+                            <Plus size={15} />
+                            <span>Skin hinzufügen</span>
+                          </button>
+                        </div>
+                      )
+                      : 'Keine Skins gefunden.'}
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(135px, 1fr))', gap: '12px' }}>
+                  {activeCategory === 'custom' && (
+                    <button
+                      type="button"
+                      onClick={handleAddCustomSkin}
+                      className="glass-card"
+                      style={{ padding: '12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', borderStyle: 'dashed', borderRadius: '16px', minHeight: '112px', color: 'var(--text-muted)', fontFamily: 'inherit' }}
+                    >
+                      <Plus size={22} />
+                      <span style={{ fontSize: '12px', fontWeight: 600 }}>Skin hinzufügen</span>
+                    </button>
+                  )}
                   {displayedSkins.map(skin => {
                     const isSelected = selectedSkin.id === skin.id;
                     const headUrl = skin.helmUrl
@@ -680,6 +856,13 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
                         onClick={() => {
                           setSelectedSkin(skin);
                           setModelVariant(skin.variant || 'classic');
+                          if (skin.detectVariant) {
+                            detectSkinVariant(skin.dataUrl).then(detected => {
+                              if (!detected) return;
+                              setSelectedSkin(prev => (prev?.id === skin.id ? { ...prev, variant: detected } : prev));
+                              setModelVariant(detected);
+                            });
+                          }
                         }}
                         className="glass-card"
                         style={{
@@ -748,6 +931,30 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
                           </button>
                         )}
 
+                        {skin.isCustom && (
+                          <div style={{ position: 'absolute', top: '6px', right: '6px', display: 'flex', gap: '4px' }}>
+                            <button
+                              type="button"
+                              onClick={(e) => handleRenameCustomSkin(e, skin)}
+                              style={{ background: 'var(--bg-well)', border: '1px solid var(--border-card)', color: 'var(--text-muted)', borderRadius: '999px', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                              title="Umbenennen"
+                            >
+                              <Pencil size={11} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteCustomSkin(e, skin)}
+                              style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', borderRadius: '999px', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                              title="Skin löschen"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        )}
+
+                        {skin.dataUrl ? (
+                          <SkinHead src={skin.dataUrl} size={52} />
+                        ) : (
                         <img
                           src={headUrl}
                           alt={skin.name}
@@ -761,6 +968,7 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
                           }}
                           loading="lazy"
                         />
+                        )}
                         <div style={{ textAlign: 'center', width: '100%' }}>
                           <div style={{ fontSize: '12.5px', fontWeight: 700, color: isSelected ? 'var(--color-primary-text)' : 'var(--text-main)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                             {skin.name}

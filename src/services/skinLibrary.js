@@ -1,42 +1,24 @@
 // Skin Library & Vorlagen mit direkten 64x64 Textur-URLs für 3D-Rendering
+import { SEASONAL_SKINS, GAMING_SKINS } from './seasonalSkins';
+
+export const getGamingSkins = () => GAMING_SKINS.map(skin => ({ ...skin, category: 'gaming' }));
+
+export const SEASON_LABELS = { winter: 'Winter', spring: 'Frühling', summer: 'Sommer', autumn: 'Herbst' };
+
+// Die fünf Skins der angegebenen Jahreszeit
+export function getSeasonalSkins(season) {
+  return SEASONAL_SKINS.filter(skin => skin.season === season).map(skin => ({ ...skin, category: 'seasonal' }));
+}
 
 export const SKIN_CATEGORIES = [
   { id: 'all', label: 'Alle' },
-  { id: 'seasonal', label: 'Herbst & Saisonal' },
+  { id: 'seasonal', label: 'Saisonal' },
+  { id: 'gaming', label: 'Gaming' },
   { id: 'fantasy', label: 'Fantasy & Abenteuer' },
   { id: 'creators', label: 'Bekannte Creator' }
 ];
 
 export const PRESET_SKINS = [
-  // Saisonal (Herbst / Halloween)
-  {
-    id: 'pumpkin-knight',
-    name: 'Kürbis-Ritter',
-    category: 'seasonal',
-    variant: 'classic',
-    description: 'Düsterer Wächter mit glühendem Kürbiskopf.',
-    playerName: 'Pumpkin',
-    textureUrl: 'https://mineskin.eu/skin/Pumpkin'
-  },
-  {
-    id: 'autumn-ranger',
-    name: 'Herbst-Waldläufer',
-    category: 'seasonal',
-    variant: 'slim',
-    description: 'Abenteurer in warmen Herbstfarben.',
-    playerName: 'Autumn',
-    textureUrl: 'https://mineskin.eu/skin/Autumn'
-  },
-  {
-    id: 'halloween-ghost',
-    name: 'Schatten-Geist',
-    category: 'seasonal',
-    variant: 'classic',
-    description: 'Mystischer Geist mit leuchtenden Augen.',
-    playerName: 'Ghost',
-    textureUrl: 'https://mineskin.eu/skin/Ghost'
-  },
-
   // Fantasy & Abenteuer
   {
     id: 'netherite-knight',

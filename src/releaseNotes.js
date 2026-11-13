@@ -1,5 +1,29 @@
 export const releaseNotes = [
   {
+    version: '0.1.5',
+    date: '13.11.2026',
+    title: 'Updates auf einen Blick, Skin-Bibliothek und Server neu starten',
+    whatsNew: [
+      'Bei Mods, Ressourcenpaketen und Shadern siehst du jetzt, ob ein Update verfügbar ist, und kannst es direkt installieren, auch im Server-Admin-Entwurf',
+      'Ein Filter zeigt nur die Einträge mit verfügbarem Update',
+      'Eigene Skins: hochladen, benennen, in 3D ansehen und direkt wechseln',
+      'Saisonale Skins pro Jahreszeit und eine neue Kategorie Gaming',
+      'Im Server-Admin gibt es unter „Auf Server anwenden“ die Knöpfe „Server neu starten“ und „Server-Konsole öffnen“',
+      'Der Reiter „Server-Chat“ heißt jetzt „Chat & Karte“'
+    ],
+    bugFixes: [
+      'Slim- und Classic-Skins werden zuverlässig erkannt',
+      'Der Zurück-Knopf auf der Detailseite führt wieder zu den installierten Mods oder zum Entwurf',
+      'Änderungen an Ressourcenpaketen und Shadern erscheinen im Veröffentlichen-Schritt und im Spieler-Changelog',
+      'Im Server-Admin steht nicht mehr fälschlich „Verbinde zuerst deinen BisectHosting-Server“'
+    ],
+    adjustments: [
+      'Die Config-Liste im Server-Admin lädt deutlich schneller',
+      'Das Backup vor dem Aufspielen sichert nur noch Mods, die ersetzt oder entfernt werden',
+      'Die 3D-Vorschau der Skins dreht sich langsamer'
+    ]
+  },
+  {
     version: '0.1.4',
     date: '13.11.2026',
     title: 'Server-Chat mit Karte und schnellere Updates',

@@ -108,6 +108,7 @@ const defaultSettings = {
   username: 'Spieler',
   account: null,
   skinHistory: [],
+  customSkins: [], // eigene Skins der Bibliothek: Name und Modell, die PNG liegt im Ordner custom-skins
   themeSeason: 'auto', // 'auto' | 'spring' | 'summer' | 'autumn' | 'winter'
   manifestUrl: '',
   servers: undefined, // Liste der angelegten Server (wird beim ersten Start angelegt)
@@ -877,9 +878,11 @@ ipcMain.handle('change-minecraft-skin', async (event, { variant = 'classic', ski
           const errText = await response.text();
           throw new Error(`Mojang API (${response.status}): ${errText}`);
         }
-      } else if (filePath && fs.existsSync(filePath)) {
-        // Multipart Upload für lokale PNG-Dateien
-        const fileData = fs.readFileSync(filePath);
+      } else if ((filePath && fs.existsSync(filePath)) || /^data:image\/png;base64,/.test(String(dataUrl || ''))) {
+        // Multipart Upload für lokale PNG-Dateien und im Launcher mitgelieferte Skins
+        const fileData = filePath && fs.existsSync(filePath)
+          ? fs.readFileSync(filePath)
+          : Buffer.from(String(dataUrl).replace(/^data:image\/png;base64,/, ''), 'base64');
         const boundary = '----WebKitFormBoundary' + crypto.randomBytes(16).toString('hex');
 
         let body = `--${boundary}\r\n`;
@@ -929,10 +932,141 @@ ipcMain.handle('change-minecraft-skin', async (event, { variant = 'classic', ski
     history = [newEntry, ...history.filter(h => (skinUrl && h.textureUrl === skinUrl) ? false : true)].slice(0, 30);
 
     saveSettings({ account: updatedAccount, skinHistory: history });
+    currentSkinCache.clear();
 
     return { success: true, account: updatedAccount, history };
   } catch (err) {
     console.error('Skin-Update Fehler:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Aktueller Skin des Kontos samt Modell (Classic oder Slim), wie Mojang ihn kennt
+const currentSkinCache = new Map();
+
+async function fetchCurrentSkin(account) {
+  // 1. Eigenes Profil bei Mojang (mit Anmeldung)
+  try {
+    const fresh = await ensureFreshAccount(account);
+    const token = fresh?.token?.access_token;
+    if (token) {
+      const res = await fetch('https://api.minecraftservices.com/minecraft/profile', {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(10000)
+      });
+      if (res.ok) {
+        const profile = await res.json();
+        const skin = (profile.skins || []).find(s => s.state === 'ACTIVE') || profile.skins?.[0];
+        if (skin) return { success: true, variant: String(skin.variant).toUpperCase() === 'SLIM' ? 'slim' : 'classic', url: skin.url || null };
+      }
+    }
+  } catch (err) {
+    console.warn('Aktueller Skin über das Profil nicht lesbar:', err.message);
+  }
+  // 2. Öffentliche Profildaten (ohne Anmeldung)
+  try {
+    const res = await fetch(`https://sessionserver.mojang.com/session/minecraft/profile/${String(account.uuid).replace(/-/g, '')}`, { signal: AbortSignal.timeout(10000) });
+    if (res.ok) {
+      const profile = await res.json();
+      const prop = (profile.properties || []).find(p => p.name === 'textures');
+      const textures = prop ? JSON.parse(Buffer.from(prop.value, 'base64').toString('utf8')) : null;
+      const skin = textures?.textures?.SKIN;
+      if (skin) return { success: true, variant: skin.metadata?.model === 'slim' ? 'slim' : 'classic', url: skin.url || null };
+    }
+  } catch (err) {
+    console.warn('Aktueller Skin über den Session-Server nicht lesbar:', err.message);
+  }
+  return { success: false };
+}
+
+ipcMain.handle('get-current-skin', async () => {
+  const account = getSettings().account;
+  if (!account || account.type !== 'microsoft' || !account.uuid) return { success: false };
+  const cached = currentSkinCache.get(account.uuid);
+  if (cached && Date.now() - cached.at < 60000) return cached.value;
+  const value = await fetchCurrentSkin(account);
+  if (value.success) currentSkinCache.set(account.uuid, { at: Date.now(), value });
+  return value;
+});
+
+// ─── Eigene Skins (Bibliothek) ─────────────────────────────────────────────
+// Die PNG-Dateien liegen im Ordner "custom-skins", in den Einstellungen stehen nur Name und Modell.
+const customSkinsDir = () => path.join(app.getPath('userData'), 'custom-skins');
+const isCustomSkinId = (id) => /^cs-[a-z0-9]{4,24}$/.test(String(id || ''));
+const customSkinFile = (id) => path.join(customSkinsDir(), `${id}.png`);
+
+function toCustomSkinView(entry) {
+  const filePath = customSkinFile(entry.id);
+  if (!fs.existsSync(filePath)) return null;
+  return {
+    ...entry,
+    filePath,
+    dataUrl: `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`
+  };
+}
+
+function listCustomSkins() {
+  return (getSettings().customSkins || []).map(toCustomSkinView).filter(Boolean);
+}
+
+function cleanSkinName(name) {
+  return String(name || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 40);
+}
+
+ipcMain.handle('custom-skins-list', () => listCustomSkins());
+
+ipcMain.handle('custom-skin-add', (event, { name, variant, dataUrl } = {}) => {
+  try {
+    const cleanName = cleanSkinName(name);
+    if (!cleanName) throw new Error('Gib dem Skin einen Namen.');
+    const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''));
+    if (!match) throw new Error('Das ist keine PNG-Datei.');
+    const buffer = Buffer.from(match[1], 'base64');
+    const isPng = buffer.length > 24 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    if (!isPng || buffer.length > 1024 * 1024) throw new Error('Das ist keine gültige Skin-Datei.');
+    const width = buffer.readUInt32BE(16);
+    const height = buffer.readUInt32BE(20);
+    if (width !== 64 || (height !== 64 && height !== 32)) throw new Error(`Ein Skin muss 64×64 Pixel groß sein (die Datei hat ${width}×${height}).`);
+
+    const id = `cs-${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
+    fs.mkdirSync(customSkinsDir(), { recursive: true });
+    fs.writeFileSync(customSkinFile(id), buffer);
+    const entry = { id, name: cleanName, variant: variant === 'slim' ? 'slim' : 'classic', createdAt: new Date().toISOString() };
+    saveSettings({ customSkins: [entry, ...(getSettings().customSkins || [])] });
+    return { success: true, skin: toCustomSkinView(entry), skins: listCustomSkins() };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('custom-skin-update', (event, { id, name, variant } = {}) => {
+  try {
+    if (!isCustomSkinId(id)) throw new Error('Ungültiger Skin.');
+    const skins = getSettings().customSkins || [];
+    if (!skins.some(s => s.id === id)) throw new Error('Skin nicht gefunden.');
+    let cleanName = null;
+    if (name !== undefined) {
+      cleanName = cleanSkinName(name);
+      if (!cleanName) throw new Error('Gib dem Skin einen Namen.');
+    }
+    saveSettings({
+      customSkins: skins.map(s => (s.id === id
+        ? { ...s, ...(cleanName ? { name: cleanName } : {}), ...(variant ? { variant: variant === 'slim' ? 'slim' : 'classic' } : {}) }
+        : s))
+    });
+    return { success: true, skins: listCustomSkins() };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('custom-skin-delete', (event, id) => {
+  try {
+    if (!isCustomSkinId(id)) throw new Error('Ungültiger Skin.');
+    saveSettings({ customSkins: (getSettings().customSkins || []).filter(s => s.id !== id) });
+    fs.rmSync(customSkinFile(id), { force: true });
+    return { success: true, skins: listCustomSkins() };
+  } catch (err) {
     return { success: false, error: err.message };
   }
 });
@@ -1252,6 +1386,97 @@ ipcMain.handle('resolve-installed-project', async (event, { category, filename }
     const result = { success: true, projectId: version.project_id };
     installedProjectCache.set(hash, result);
     return result;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Sucht über die Datei-Hashes bei Modrinth, ob es zu installierten Mods, Resourcepacks oder Shadern eine neuere Version gibt
+ipcMain.handle('check-item-updates', async (event, { category, gameVersion = '', loader = '' } = {}) => {
+  try {
+    if (!['mods', 'resourcepacks', 'shaderpacks'].includes(category)) return { success: true, updates: {} };
+    const dir = path.join(getEditInstanceDir(), category);
+    if (!fs.existsSync(dir)) return { success: true, updates: {} };
+
+    const byHash = new Map();
+    for (const filename of fs.readdirSync(dir)) {
+      const fullPath = path.join(dir, filename);
+      if (fs.statSync(fullPath).isDirectory()) continue;
+      const hash = await getFileSha1(fullPath);
+      if (hash) byHash.set(hash, filename);
+    }
+    if (byHash.size === 0) return { success: true, updates: {} };
+
+    const loaders = category === 'mods'
+      ? (loader && loader !== 'vanilla' ? [loader] : ['fabric'])
+      : (category === 'resourcepacks' ? ['minecraft'] : ['iris', 'optifine', 'canvas', 'vanilla']);
+    const hashes = [...byHash.keys()];
+    const headers = { 'User-Agent': 'Electron-Minecraft-Launcher/1.0', 'Content-Type': 'application/json' };
+    const post = async (endpoint, body) => {
+      const res = await fetch(`https://api.modrinth.com/v2/${endpoint}`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
+      if (!res.ok) throw new Error(`Modrinth antwortet mit HTTP ${res.status}.`);
+      return res.json();
+    };
+
+    const latest = await post('version_files/update', {
+      hashes, algorithm: 'sha1', loaders, ...(gameVersion ? { game_versions: [gameVersion] } : {})
+    });
+    const current = await post('version_files', { hashes, algorithm: 'sha1' });
+
+    const updates = {};
+    for (const [hash, filename] of byHash) {
+      const next = latest[hash];
+      const now = current[hash];
+      if (!next || !now || next.id === now.id) continue;
+      // Nie auf eine ältere Version "aktualisieren"
+      if (new Date(next.date_published) <= new Date(now.date_published)) continue;
+      // Wer eine fertige Version nutzt, bekommt keine Beta oder Alpha vorgeschlagen
+      if (now.version_type === 'release' && next.version_type !== 'release') continue;
+      updates[filename] = { currentVersion: now.version_number || '', latestVersion: next.version_number || '', latestVersionId: next.id, projectId: next.project_id };
+    }
+    return { success: true, updates };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Ersetzt eine installierte Datei durch die gewählte neue Modrinth-Version
+ipcMain.handle('apply-item-update', async (event, { category, filename, versionId } = {}) => {
+  try {
+    if (!['mods', 'resourcepacks', 'shaderpacks'].includes(category)) throw new Error('Ungültige Kategorie.');
+    if (!/^[A-Za-z0-9]{6,16}$/.test(String(versionId || ''))) throw new Error('Ungültige Version.');
+    const dir = path.join(getEditInstanceDir(), category);
+    const oldPath = path.join(dir, filename);
+    if (path.dirname(oldPath) !== dir || !fs.existsSync(oldPath)) throw new Error('Datei nicht gefunden.');
+
+    const res = await fetch(`https://api.modrinth.com/v2/version/${versionId}`, { headers: { 'User-Agent': 'Electron-Minecraft-Launcher/1.0' }, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`Modrinth antwortet mit HTTP ${res.status}.`);
+    const version = await res.json();
+    const file = version.files?.find(f => f.primary) || version.files?.[0];
+    const safeName = category === 'mods' ? isSafeModFilename(file?.filename) : isSafePackFilename(file?.filename);
+    if (!file || !safeName || !isAllowedModUrl(file.url)) throw new Error('Die neue Version hat keine passende Datei.');
+
+    const wasDisabled = filename.endsWith('.disabled');
+    const newPath = path.join(dir, file.filename + (wasDisabled ? '.disabled' : ''));
+    if (newPath !== oldPath && fs.existsSync(newPath)) throw new Error(`${file.filename} existiert schon im Ordner.`);
+
+    await downloadVerified(file.url, newPath, file.hashes?.sha1);
+    if (newPath !== oldPath) fs.rmSync(oldPath, { force: true });
+
+    // Mods, die der Spieler selbst installiert hat, bekommen auch ihren Eintrag aktualisiert
+    if (category === 'mods') {
+      const baseName = filename.replace(/\.disabled$/, '');
+      const state = loadUserModsState();
+      if (state.mods.some(mod => mod.filename === baseName)) {
+        saveUserModsState({
+          ...state,
+          mods: state.mods.map(mod => (mod.filename === baseName
+            ? { ...mod, filename: file.filename, versionId: version.id, versionNumber: version.version_number, sha1: file.hashes?.sha1, downloadUrl: file.url, size: file.size }
+            : mod))
+        });
+      }
+    }
+    return { success: true, filename: path.basename(newPath) };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -1733,7 +1958,9 @@ handleAdmin('modpack-apply-server', async (event, { dryRun = false, target = 'dr
     // Vor dem Aufspielen von Test-Mods automatisches Snapshot-Backup aller Server-Dateien anlegen
     if (target === 'draft') {
       try {
-        const bState = await backupServerMods(serverId, addLog);
+        // Nur sichern, was ersetzt oder gelöscht wird. Unveränderte Mods bleiben auf dem Server, dort ändert sich nichts.
+        const affected = new Set([...plan.remove, ...plan.upload.filter(mod => mod.replace).map(mod => mod.filename)]);
+        const bState = await backupServerMods(serverId, addLog, affected);
         bState.addedTestFiles = plan.upload.map(mod => mod.filename);
         writeJsonFile(serverTestBackupStatePath(), bState);
       } catch (backupErr) {
@@ -1921,18 +2148,26 @@ async function downloadServerFile(serverId, remotePath) {
   return Buffer.from(await fileRes.arrayBuffer());
 }
 
-async function backupServerMods(serverId, addLog = () => {}) {
+// onlyNames: nur diese Mods wirklich herunterladen (die, die ersetzt oder gelöscht werden). Alle anderen bleiben
+// unangetastet und stehen nur in der Liste, damit die Wiederherstellung weiß, was zum Stand gehört.
+async function backupServerMods(serverId, addLog = () => {}, onlyNames = null) {
   const backupDir = path.join(serverBackupsDir(), serverId, 'snapshot');
   if (!fs.existsSync(backupDir)) {
     fs.mkdirSync(backupDir, { recursive: true });
   }
 
-  addLog('📦 Erstelle lokales Backup aller aktuellen Mod-Dateien im Server /mods-Ordner...');
+  addLog(onlyNames
+    ? `📦 Sichere die ${onlyNames.size} Mod(s), die ersetzt oder entfernt werden...`
+    : '📦 Erstelle lokales Backup aller aktuellen Mod-Dateien im Server /mods-Ordner...');
   const serverFiles = await listServerMods(serverId);
   const jarFiles = serverFiles.filter(f => f.name && f.name.endsWith('.jar'));
 
   const savedFiles = [];
   for (const file of jarFiles) {
+    if (onlyNames && !onlyNames.has(file.name)) {
+      savedFiles.push({ name: file.name, size: file.size });
+      continue;
+    }
     const localFilePath = path.join(backupDir, file.name);
     let needDownload = true;
     if (fs.existsSync(localFilePath)) {
@@ -1969,7 +2204,9 @@ async function backupServerMods(serverId, addLog = () => {}) {
     addedTestFiles: []
   };
   writeJsonFile(serverTestBackupStatePath(), state);
-  addLog(`✅ Backup erfolgreich: ${savedFiles.length} Mod(s) lokal gesichert.`);
+  addLog(onlyNames
+    ? `✅ Backup erfolgreich: ${onlyNames.size} betroffene Mod(s) gesichert, ${savedFiles.length} Mod(s) auf dem Server insgesamt.`
+    : `✅ Backup erfolgreich: ${savedFiles.length} Mod(s) lokal gesichert.`);
   return state;
 }
 
@@ -2325,6 +2562,18 @@ handleAdmin('modpack-publish', async (event, { bumpType = 'patch', customVersion
         toVersion: m.versionNumber || ''
       }));
 
+    // Ressourcen- und Shaderpakete landen in denselben Listen, mit dem Typ als Zusatz
+    const packChanges = { added: [], updated: [], removed: [] };
+    for (const [key, kind] of [['resourcepacks', 'Ressourcenpaket'], ['shaderpacks', 'Shader']]) {
+      const before = new Map((Array.isArray(remote?.[key]) ? remote[key] : []).map(p => [p.slug, p]));
+      const after = (draft[key] || []).filter(p => !p.disabled);
+      const afterMap = new Map(after.map(p => [p.slug, p]));
+      after.filter(p => !before.has(p.slug)).forEach(p => packChanges.added.push({ name: p.name || p.slug, version: p.versionNumber || '', kind }));
+      after.filter(p => before.has(p.slug) && before.get(p.slug).versionId !== p.versionId)
+        .forEach(p => packChanges.updated.push({ name: p.name || p.slug, fromVersion: before.get(p.slug).versionNumber || '', toVersion: p.versionNumber || '', kind }));
+      [...before.values()].filter(p => !afterMap.has(p.slug)).forEach(p => packChanges.removed.push({ name: p.name || p.slug, kind }));
+    }
+
     const newEntry = {
       version: nextVersion,
       date: new Date().toLocaleDateString('de-DE'),
@@ -2332,9 +2581,9 @@ handleAdmin('modpack-publish', async (event, { bumpType = 'patch', customVersion
       changelog: cleanChangelog,
       publishedAt: new Date().toISOString(),
       modChanges: {
-        added: modChangesAdded,
-        updated: modChangesUpdated,
-        removed: modChangesRemoved
+        added: [...modChangesAdded, ...packChanges.added],
+        updated: [...modChangesUpdated, ...packChanges.updated],
+        removed: [...modChangesRemoved, ...packChanges.removed]
       }
     };
     const existIdx = history.findIndex(h => h.version === nextVersion);

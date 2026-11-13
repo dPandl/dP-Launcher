@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FlaskConical, Zap, Rocket, RefreshCw, RotateCcw, CheckCircle2, AlertCircle, Play, Square, FolderOpen, Shield, Sliders, Check, Search, FileText, Sparkles } from 'lucide-react';
+import { FlaskConical, Zap, Rocket, RefreshCw, RotateCcw, RotateCw, Terminal, CheckCircle2, AlertCircle, Play, Square, FolderOpen, Shield, Sliders, Check, Search, FileText, Sparkles } from 'lucide-react';
+import Dialog from '../common/Dialog';
+import ServerConsoleView from './ServerConsoleView';
 import { BisectService } from '../../services/bisectService';
 import { diffManifests } from '../../services/modpackService';
 import { bumpVersion, getManifestMods, isValidCustomVersion } from '../../../modpackUtils.js';
@@ -32,8 +34,11 @@ function Notice({ type, children }) {
 
 const MAX_TEST_LOG_LINES = 200;
 
-export default function ModpackPipeline({ draft, published, settings, onPublished }) {
-  const serverId = settings?.bisectConfig?.serverId;
+export default function ModpackPipeline({ draft, published, settings, onPublished, selectedServer = null, bisectConfig = null, isConnected = false }) {
+  // Die Server-ID aus den Einstellungen, sonst die des verbundenen Servers im Panel
+  const serverId = settings?.bisectConfig?.serverId || selectedServer?.attributes?.identifier;
+  const [showConsole, setShowConsole] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
 
   const [gameStatus, setGameStatus] = useState({ status: 'idle', message: '', percent: 0 });
   const [testError, setTestError] = useState(null);
@@ -226,12 +231,24 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
   };
 
   const handleRestart = async () => {
+    setIsRestarting(true);
     try {
       await BisectService.sendPowerAction(serverId, 'restart');
-      setApplyResult(prev => ({ ...prev, changed: 0, restarted: true }));
+      setApplyResult(prev => ({ success: true, ...prev, changed: 0, restarted: true }));
     } catch (err) {
       appAlert(`Neustart fehlgeschlagen: ${err.message}`, { warning: true });
+    } finally {
+      setIsRestarting(false);
     }
+  };
+
+  const handleRestartClick = async () => {
+    const sure = await appConfirm('Den Server jetzt neu starten? Spieler, die gerade online sind, werden getrennt.', {
+      title: 'Server neu starten?',
+      confirmLabel: 'Jetzt neu starten',
+      cancelLabel: 'Abbrechen'
+    });
+    if (sure) await handleRestart();
   };
 
   const handlePublish = async () => {
@@ -433,7 +450,7 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
             }}>
               <Shield size={16} style={{ flexShrink: 0, color: '#10b981' }} />
               <span>
-                <strong>Automatisches Backup-Sicherheitsnetz:</strong> Vor der Übertragung wird automatisch ein vollständiges lokales Backup aller Mod-Dateien im Server <code>/mods</code>-Ordner (inklusive aller Server-Only Mods) auf deinem PC gesichert. Du kannst den Test danach jederzeit mit 1 Klick rückgängig machen.
+                <strong>Automatisches Backup-Sicherheitsnetz:</strong> Vor der Übertragung werden automatisch die Mods im Server <code>/mods</code>-Ordner auf deinem PC gesichert, die dabei ersetzt oder entfernt werden (auch Server-Only Mods). Unveränderte Mods bleiben auf dem Server. Du kannst den Test danach jederzeit mit 1 Klick rückgängig machen.
               </span>
             </div>
 
@@ -455,11 +472,21 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
                   <span>{isRestoringBackup ? 'Wird wiederhergestellt...' : 'Test beenden & Backup wiederherstellen'}</span>
                 </button>
               )}
-              {applyResult?.changed > 0 && (
-                <button className="btn-secondary" onClick={handleRestart}>
-                  <RotateCcw size={15} /> Server neu starten
-                </button>
-              )}
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleRestartClick}
+                disabled={isRestarting}
+                style={applyResult?.changed > 0 ? { color: 'var(--color-primary)', borderColor: 'var(--color-primary)' } : undefined}
+                title="Startet den Minecraft-Server neu, damit neue Mods geladen werden"
+              >
+                <RotateCw size={15} className={isRestarting ? 'spin' : ''} />
+                <span>{isRestarting ? 'Wird neu gestartet...' : 'Server neu starten'}</span>
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => setShowConsole(true)} title="Öffnet die Live-Konsole des Servers">
+                <Terminal size={15} />
+                <span>Server-Konsole öffnen</span>
+              </button>
             </div>
 
             {isApplying && applyProgress && (
@@ -481,6 +508,14 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
             )}
             {applyResult?.restarted && <Notice type="success">Neustart wurde an den Server gesendet.</Notice>}
             {applyResult && !applyResult.success && <Notice type="error">{applyResult.error}</Notice>}
+
+            {showConsole && (
+              <Dialog title="Server-Konsole" icon={Terminal} onClose={() => setShowConsole(false)} maxWidth="1200px">
+                <div style={{ height: '72vh', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                  <ServerConsoleView selectedServer={selectedServer} bisectConfig={bisectConfig} isConnected={isConnected} />
+                </div>
+              </Dialog>
+            )}
           </>
         )}
       </Step>
@@ -505,6 +540,12 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
           ))}
           {diff.removed.map(mod => (
             <div key={mod.slug} style={{ color: '#ef4444' }}>− {mod.name || mod.slug}</div>
+          ))}
+          {diff.packs.map(pack => (
+            <div key={`${pack.kind}:${pack.slug}`} style={{ color: pack.type === 'added' ? '#10b981' : pack.type === 'removed' ? '#ef4444' : '#38bdf8' }}>
+              {pack.type === 'added' ? '+' : pack.type === 'removed' ? '−' : '~'} {pack.name} ({pack.kind})
+              {pack.type === 'changed' ? `: ${pack.fromVersion || 'nicht festgeschrieben'} → ${pack.versionNumber}` : pack.type === 'added' && pack.versionNumber ? ` ${pack.versionNumber}` : ''}
+            </div>
           ))}
         </div>
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FolderOpen, Trash2, ToggleLeft, ToggleRight, RefreshCw, Package, Sparkles, Palette, ShoppingBag, FolderArchive, Search, ArrowUpDown, Sliders, Box, Layers, Globe } from 'lucide-react';
+import { FolderOpen, Trash2, ToggleLeft, ToggleRight, RefreshCw, Package, Sparkles, Palette, ShoppingBag, FolderArchive, Search, ArrowUpDown, Sliders, Box, Layers, Globe, ArrowUpCircle } from 'lucide-react';
 import { appConfirm, appAlert } from '../utils/appDialog';
 import ModrinthStoreView from './ModrinthStoreView';
 import LocalConfigEditor from './LocalConfigEditor';
@@ -68,6 +68,9 @@ export default function ModsManagerView({ manifest, settings, initialInstanceId 
   const [category, setCategory] = useState('mods'); // 'mods' | 'shaderpacks' | 'resourcepacks' | 'configs'
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [updates, setUpdates] = useState({}); // filename -> { currentVersion, latestVersion, latestVersionId }
+  const [updatingFile, setUpdatingFile] = useState(null);
+  const [onlyUpdates, setOnlyUpdates] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState(getStoredSort); // 'name-asc' | 'name-desc' | 'date-desc' | 'date-asc'
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'active' | 'disabled'
@@ -99,12 +102,36 @@ export default function ModsManagerView({ manifest, settings, initialInstanceId 
     }
   }, [category, mainTab, targetReady, targetKey]);
 
+  // Nach Updates suchen, sobald die Liste da ist (Datei-Hash bei Modrinth nachschlagen)
+  useEffect(() => {
+    setUpdates({});
+    if (mainTab !== 'installed' || category === 'configs' || items.length === 0 || !window.electronAPI?.checkItemUpdates) return undefined;
+    let cancelled = false;
+    window.electronAPI.checkItemUpdates({ category, gameVersion: storeManifest?.gameVersion || '', loader: storeManifest?.loader || '' })
+      .then(res => { if (!cancelled && res?.success) setUpdates(res.updates || {}); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [items, category, mainTab]);
+
   const handleToggle = async (filename) => {
     if (window.electronAPI) {
       const res = await window.electronAPI.toggleMod(filename);
       if (res.success) {
         loadItems(category);
       }
+    }
+  };
+
+  const handleUpdate = async (filename) => {
+    const info = updates[filename];
+    if (!info || !window.electronAPI?.applyItemUpdate) return;
+    setUpdatingFile(filename);
+    try {
+      const res = await window.electronAPI.applyItemUpdate({ category, filename, versionId: info.latestVersionId });
+      if (res?.success) loadItems(category);
+      else appAlert(res?.error || 'Das Update ist fehlgeschlagen.', { warning: true });
+    } finally {
+      setUpdatingFile(null);
     }
   };
 
@@ -164,6 +191,7 @@ export default function ModsManagerView({ manifest, settings, initialInstanceId 
 
   const filteredAndSortedItems = useMemo(() => {
     let list = items;
+    if (onlyUpdates) list = list.filter(item => updates[item.filename]);
     if (category === 'mods' && statusFilter !== 'all') {
       list = list.filter(item => (statusFilter === 'active' ? item.enabled : !item.enabled));
     }
@@ -195,7 +223,10 @@ export default function ModsManagerView({ manifest, settings, initialInstanceId 
       }
       return 0;
     });
-  }, [items, searchQuery, sortBy, statusFilter, category]);
+  }, [items, searchQuery, sortBy, statusFilter, category, onlyUpdates, updates]);
+
+  const updateCount = Object.keys(updates).length;
+  useEffect(() => { if (updateCount === 0) setOnlyUpdates(false); }, [updateCount]);
 
   const statusFilters = [
     { id: 'all', label: `Alle (${items.length})`, color: 'var(--color-primary-text)' },
@@ -260,7 +291,7 @@ export default function ModsManagerView({ manifest, settings, initialInstanceId 
 
       {/* 2. INHALT JE NACH REITER */}
       {mainTab === 'store' ? (
-        <ModrinthStoreView key={targetKey} manifest={storeManifest} hideHeader={true} openRequest={openRequest} />
+        <ModrinthStoreView key={targetKey} manifest={storeManifest} hideHeader={true} openRequest={openRequest} onReturnFromRequest={() => setMainTab('installed')} />
       ) : (
         <div className="glass-card" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '16px 18px', overflow: 'hidden' }}>
           {/* Kategorie-Reiter im Stil der Entwurfsliste */}
@@ -356,6 +387,23 @@ export default function ModsManagerView({ manifest, settings, initialInstanceId 
                     <option value="date-asc">Installationsdatum (Älteste)</option>
                   </Dropdown>
                 </div>
+
+                {updateCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setOnlyUpdates(v => !v)}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', fontSize: '12.5px', fontFamily: 'inherit', cursor: 'pointer', borderRadius: '10px',
+                      border: '1px solid ' + (onlyUpdates ? 'rgba(245, 158, 11, 0.6)' : 'var(--border-card)'),
+                      background: onlyUpdates ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-well)',
+                      color: onlyUpdates ? '#f59e0b' : 'var(--text-muted)', fontWeight: onlyUpdates ? 700 : 500
+                    }}
+                    title="Nur Einträge mit verfügbarem Update anzeigen"
+                  >
+                    <ArrowUpCircle size={14} />
+                    Nur Updates ({updateCount})
+                  </button>
+                )}
 
                 {category === 'mods' && disabledCount > 0 && (
                   <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-well)', padding: '2px', borderRadius: '10px', border: '1px solid var(--border-card)' }}>
@@ -487,6 +535,16 @@ export default function ModsManagerView({ manifest, settings, initialInstanceId 
                           {isDisabled && (
                             <span className="badge" style={{ color: '#94a3b8', fontSize: '11px', padding: '1px 8px' }}>deaktiviert</span>
                           )}
+                          {updates[item.filename] && (
+                            <span
+                              className="badge"
+                              style={{ color: '#f59e0b', fontSize: '11px', padding: '1px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              title={`Neue Version verfügbar: ${updates[item.filename].currentVersion || 'installiert'} → ${updates[item.filename].latestVersion}`}
+                            >
+                              <ArrowUpCircle size={11} />
+                              Update {updates[item.filename].latestVersion}
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {item.version ? `${item.version} · ` : ''}{item.name ? `${item.filename} · ` : ''}{sizeMb} MB{dateText ? ` · ${dateText}` : ''}
@@ -494,6 +552,18 @@ export default function ModsManagerView({ manifest, settings, initialInstanceId 
                       </div>
                       </div>
 
+                      {updates[item.filename] && (
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ padding: '6px 10px', color: '#f59e0b' }}
+                          disabled={Boolean(updatingFile)}
+                          onClick={() => handleUpdate(item.filename)}
+                          title={`Auf ${updates[item.filename].latestVersion} aktualisieren`}
+                        >
+                          {updatingFile === item.filename ? <RefreshCw size={13} className="spin" /> : <ArrowUpCircle size={13} />}
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn-secondary"

@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   changeSkin: (options) => ipcRenderer.invoke('change-minecraft-skin', options),
   selectSkinFile: () => ipcRenderer.invoke('select-skin-file'),
   getSkinHistory: () => ipcRenderer.invoke('get-skin-history'),
+  getCurrentSkin: () => ipcRenderer.invoke('get-current-skin'),
+  listCustomSkins: () => ipcRenderer.invoke('custom-skins-list'),
+  addCustomSkin: (options) => ipcRenderer.invoke('custom-skin-add', options),
+  updateCustomSkin: (options) => ipcRenderer.invoke('custom-skin-update', options),
+  deleteCustomSkin: (id) => ipcRenderer.invoke('custom-skin-delete', id),
   deleteSkinHistoryItem: (id) => ipcRenderer.invoke('delete-skin-history-item', id),
 
   // Window Controls
@@ -77,6 +82,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('server-file-opened', subscription);
     return () => ipcRenderer.removeListener('server-file-opened', subscription);
   },
+  applyItemUpdate: (options) => ipcRenderer.invoke('apply-item-update', options),
+  checkItemUpdates: (options) => ipcRenderer.invoke('check-item-updates', options),
   resolveInstalledProject: (category, filename) => ipcRenderer.invoke('resolve-installed-project', { category, filename }),
   toggleMod: (filename) => ipcRenderer.invoke('toggle-mod', filename),
 

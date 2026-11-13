@@ -12,6 +12,7 @@ export default function ModpackDiscover({
   active = true,
   draft,
   openRequest,
+  onReturnFromRequest = null,
   onDraftChange,
   onWarnings,
   selectedServer = null,
@@ -566,6 +567,7 @@ export default function ModpackDiscover({
         renderAction={renderAction}
         renderVersionAction={renderVersionAction}
         openRequest={openRequest}
+        onReturnFromRequest={onReturnFromRequest}
         active={active}
       />
     </div>

@@ -175,6 +175,8 @@ export default function AdminPanelView({
         setSelectedServer(target);
         if (!config.serverId) {
           setBisectConfig(prev => ({ ...prev, serverId: target.attributes.identifier }));
+          // Auch speichern: Schritt 2 (Auf Server anwenden) liest die Server-ID aus den Einstellungen
+          onUpdateSettings?.({ bisectConfig: { ...config, serverId: target.attributes.identifier } });
         }
       }
     } catch (err) {
@@ -712,6 +714,7 @@ export default function AdminPanelView({
                 active={modpackView === 'discover'}
                 draft={draft}
                 openRequest={discoverRequest}
+                onReturnFromRequest={() => setModpackView('draft')}
                 onDraftChange={onDraftChange}
                 onWarnings={setDraftWarnings}
                 selectedServer={selectedServer}
@@ -737,6 +740,9 @@ export default function AdminPanelView({
                   published={publishedManifest}
                   settings={settings}
                   onPublished={onPublished}
+                  selectedServer={selectedServer}
+                  bisectConfig={bisectConfig}
+                  isConnected={isConnected}
                 />
               </div>
             )}

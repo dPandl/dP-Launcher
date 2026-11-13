@@ -255,7 +255,7 @@ export default function ServerChangelog({ manifest, isAdmin = false, onRefreshMa
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       {entry.modChanges.added.map((m, i) => (
                         <span key={i} className="badge" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.25)', fontSize: '11.5px', padding: '2px 8px' }}>
-                          + {m.name} {m.version ? `(${m.version})` : ''}
+                          + {m.name}{m.kind ? ` · ${m.kind}` : ''} {m.version ? `(${m.version})` : ''}
                         </span>
                       ))}
                     </div>
@@ -270,7 +270,7 @@ export default function ServerChangelog({ manifest, isAdmin = false, onRefreshMa
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       {entry.modChanges.updated.map((m, i) => (
                         <span key={i} className="badge" style={{ background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.25)', fontSize: '11.5px', padding: '2px 8px' }}>
-                          ~ {m.name} {m.fromVersion && m.toVersion ? `(${m.fromVersion} → ${m.toVersion})` : m.toVersion || ''}
+                          ~ {m.name}{m.kind ? ` · ${m.kind}` : ''} {m.fromVersion && m.toVersion ? `(${m.fromVersion} → ${m.toVersion})` : m.toVersion || ''}
                         </span>
                       ))}
                     </div>
@@ -285,7 +285,7 @@ export default function ServerChangelog({ manifest, isAdmin = false, onRefreshMa
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       {entry.modChanges.removed.map((m, i) => (
                         <span key={i} className="badge" style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.25)', fontSize: '11.5px', padding: '2px 8px' }}>
-                          − {m.name}
+                          − {m.name}{m.kind ? ` · ${m.kind}` : ''}
                         </span>
                       ))}
                     </div>

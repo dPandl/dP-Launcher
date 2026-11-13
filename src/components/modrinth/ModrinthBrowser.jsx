@@ -58,6 +58,7 @@ export default function ModrinthBrowser({
   renderAction,
   renderVersionAction,
   openRequest = null,
+  onReturnFromRequest = null, // wird statt der Liste gezeigt, wenn die Detailseite von außen geöffnet wurde
   lockedLabel = 'Festgelegt durch den Server',
   active = true // false, wenn die Ansicht nur versteckt weiterlebt (kein Zurück-Knopf, kein Escape)
 }) {
@@ -148,7 +149,10 @@ export default function ModrinthBrowser({
     return () => { cancelled = true; };
   }, [type.id, query, filters, sort, page, pageSize, lockedGameVersion, lockedLoader, retryCounter]);
 
+  const openedFromOutside = useRef(false);
+
   const openProject = (ref) => {
+    if (!hasDetail) openedFromOutside.current = false;
     if (!hasDetail) listScrollTop.current = scrollContainer()?.scrollTop || 0;
     setDetailStack(prev => [...prev, ref]);
     const container = scrollContainer();
@@ -158,6 +162,11 @@ export default function ModrinthBrowser({
   const closeProject = () => {
     const returningToList = detailStack.length === 1;
     setDetailStack(prev => prev.slice(0, -1));
+    if (returningToList && openedFromOutside.current) {
+      openedFromOutside.current = false;
+      onReturnFromRequest?.();
+      return;
+    }
     requestAnimationFrame(() => {
       const container = scrollContainer();
       if (container) container.scrollTop = returningToList ? listScrollTop.current : 0;
@@ -187,7 +196,10 @@ export default function ModrinthBrowser({
 
   // Ansichten außerhalb des Browsers können direkt eine Detailseite öffnen
   useEffect(() => {
-    if (openRequest?.ref) setDetailStack([openRequest.ref]);
+    if (openRequest?.ref) {
+      openedFromOutside.current = Boolean(onReturnFromRequest);
+      setDetailStack([openRequest.ref]);
+    }
   }, [openRequest]);
 
   const changeType = (nextTypeId) => {
