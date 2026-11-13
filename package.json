@@ -75,6 +75,7 @@
       ]
     },
     "linux": {
+      "executableName": "dP-Launcher",
       "icon": "public/app-icon.png",
       "target": [
         "zip"
