@@ -1,5 +1,23 @@
 export const releaseNotes = [
   {
+    version: '0.1.7',
+    date: '13.11.2026',
+    title: 'Configs, Shader und Ressourcenpakete kommen bei Spielern an',
+    whatsNew: [
+      'Configs gelten bei den Spielern nur beim ersten Start, einzelne Dateien lassen sich mit „Immer überschreiben“ bei jedem Start erzwingen',
+      'Im Server-Admin lassen sich Configs mit „Jetzt hochladen“ ohne neue Modpack-Version und ohne Changelog aktualisieren',
+      'Die Veröffentlichen-Karte zeigt geänderte Configs an, und der Knopf ist auch bei reinen Config-Änderungen frei',
+      'Alle, Keine und Empfohlene in der Config-Auswahl, dazu ein Umschalter für „Immer überschreiben“',
+      'Neuer Knopf „Configs zurücksetzen“ in der Testinstanz'
+    ],
+    bugFixes: [
+      'Ressourcenpakete, Shader, Standard-Shader und Configs des Modpacks kommen jetzt tatsächlich bei den Spielern an',
+      'Die Testinstanz überschreibt deine Config-Änderungen nicht mehr bei jedem Start',
+      'Auf Linux heißt die Startdatei dP-Launcher'
+    ],
+    adjustments: []
+  },
+  {
     version: '0.1.6',
     date: '13.11.2026',
     title: 'Eigene Mods im Modpack',

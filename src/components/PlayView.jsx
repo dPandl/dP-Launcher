@@ -144,7 +144,13 @@ export default function PlayView({ manifest, activeSeason, settings, account, on
         loader: target?.loader || 'fabric',
         packComplete,
         // Fehlt eine Mod wegen eines Modrinth-Fehlers, darf nichts weggeräumt werden
-        cleanOldMods: target?.cleanOldMods !== false && packComplete
+        cleanOldMods: target?.cleanOldMods !== false && packComplete,
+        // Ressourcenpakete, Shader und Configs gehören zum Abgleich, sonst kommen sie bei den Spielern nie an
+        resourcepacks: target?.resourcepacks || [],
+        shaderpacks: target?.shaderpacks || [],
+        defaultShader: target?.defaultShader || null,
+        configs: target?.configs || {},
+        configForce: target?.configForce || []
       });
 
       if (result.userModNotices?.length > 0) {

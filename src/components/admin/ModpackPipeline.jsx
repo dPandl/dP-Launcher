@@ -7,7 +7,7 @@ import { diffManifests } from '../../services/modpackService';
 import { bumpVersion, getManifestMods, isValidCustomVersion } from '../../../modpackUtils.js';
 import { appConfirm, appAlert } from '../../utils/appDialog';
 import { getLogLineColor } from '../../utils/logFormatter';
-import { getSyncedConfigFiles } from './ConfigSyncCard';
+import { getSyncedConfigFiles, getForcedConfigFiles } from './ConfigSyncCard';
 
 function Step({ icon: Icon, title, children }) {
   return (
@@ -79,6 +79,18 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
     }
   };
 
+  // Änderungen an den mitveröffentlichten Configs gegenüber dem veröffentlichten Stand
+  const [configChanges, setConfigChanges] = useState([]);
+  const refreshConfigChanges = async () => {
+    try {
+      const res = await window.electronAPI?.getConfigChanges?.({ selected: getSyncedConfigFiles(), forced: getForcedConfigFiles() });
+      setConfigChanges(res?.success ? res.changes : []);
+    } catch {
+      setConfigChanges([]);
+    }
+  };
+  useEffect(() => { refreshConfigChanges(); }, [published?.modpackVersion, gameStatus.status]);
+
   const diff = diffManifests(published, draft);
   // Das alte Format hat keine festen Versionen und muss einmal veröffentlicht werden
   const publishedIsPinned = Array.isArray(published?.mods);
@@ -88,7 +100,7 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
   const versionsChanged = publishedIsPinned && (
     (draft.gameVersion || '') !== (published?.gameVersion || '') || (draft.loaderVersion || '') !== (published?.loaderVersion || '')
   );
-  const canPublish = draft.mods.length > 0 && (diff.total > 0 || versionsChanged || !publishedIsPinned) && (!isCustom || customVersionValid);
+  const canPublish = draft.mods.length > 0 && (diff.total > 0 || versionsChanged || configChanges.length > 0 || !publishedIsPinned) && (!isCustom || customVersionValid);
   const nextVersion = isCustom ? customVersion.trim() : bumpVersion(published?.modpackVersion, bumpType);
   const serverPending = serverPlan && (serverPlan.upload.length > 0 || serverPlan.remove.length > 0);
 
@@ -154,6 +166,20 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
     setTestLog([]);
     const res = await window.electronAPI.launchModpackTest();
     if (!res.success) setTestError(res.error);
+  };
+
+  const handleResetTestConfigs = async () => {
+    const sure = await appConfirm(
+      'Die Configs der Testinstanz werden auf den Stand des Entwurfs zurückgesetzt. Änderungen, die du im Spiel an diesen Dateien gemacht hast, gehen verloren.',
+      { title: 'Test-Configs zurücksetzen?', confirmLabel: 'Zurücksetzen', cancelLabel: 'Abbrechen' }
+    );
+    if (!sure) return;
+    const res = await window.electronAPI.resetTestConfigs();
+    if (res.success) {
+      appAlert(res.count > 0 ? `${res.count} Config-Datei(en) auf den Entwurfs-Stand gesetzt.` : 'Im Entwurf sind keine Configs hinterlegt, es gab nichts zurückzusetzen.');
+    } else {
+      setTestError(res.error);
+    }
   };
 
   const handleStopTest = async () => {
@@ -265,7 +291,8 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
       customVersion: isCustom ? customVersion.trim() : '',
       changelog,
       title: changelogTitle,
-      selectedConfigFiles: getSyncedConfigFiles()
+      selectedConfigFiles: getSyncedConfigFiles(),
+      forcedConfigFiles: getForcedConfigFiles()
     });
     setIsPublishing(false);
     setPublishResult(res);
@@ -283,7 +310,7 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
       {/* 1. Lokal testen */}
       <Step icon={FlaskConical} title="1. Lokal testen">
         <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '12px' }}>
-          Startet den Entwurf in einer eigenen Instanz im Hauptmenü. Deine normale Installation, die Spieler und der Server bleiben unverändert. Einstellungen und Welten der Testinstanz bleiben zwischen den Tests erhalten.
+          Startet den Entwurf in einer eigenen Instanz im Hauptmenü. Deine normale Installation, die Spieler und der Server bleiben unverändert. Einstellungen, Configs und Welten der Testinstanz bleiben zwischen den Tests erhalten, mit „Configs zurücksetzen“ gehen die Configs wieder auf den Stand des Entwurfs.
         </p>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -299,6 +326,9 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
           )}
           <button className="btn-secondary" onClick={() => window.electronAPI.openTestInstanceDir()} title="Ordner der Testinstanz öffnen">
             <FolderOpen size={15} /> Ordner
+          </button>
+          <button className="btn-secondary" onClick={handleResetTestConfigs} disabled={isGameRunning || isGameStarting} title="Configs der Testinstanz auf den Stand des Entwurfs zurücksetzen">
+            <RotateCcw size={15} /> Configs zurücksetzen
           </button>
           {testLog.length > 0 && (
             <button className="btn-secondary" onClick={() => setShowTestLog(!showTestLog)}>
@@ -523,7 +553,7 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
       {/* 3. Veröffentlichen */}
       <Step icon={Rocket} title="3. Veröffentlichen">
         <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>
-          {diff.total === 0 && !versionsChanged && 'Keine Änderungen gegenüber der veröffentlichten Liste.'}
+          {diff.total === 0 && !versionsChanged && configChanges.length === 0 && 'Keine Änderungen gegenüber der veröffentlichten Liste.'}
           {versionsChanged && (
             <div style={{ color: '#38bdf8' }}>
               ~ Version: Minecraft {published?.gameVersion || '?'} → {draft.gameVersion || '?'}, Fabric {published?.loaderVersion || 'automatisch'} → {draft.loaderVersion || 'automatisch'}
@@ -540,6 +570,13 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
           ))}
           {diff.removed.map(mod => (
             <div key={mod.slug} style={{ color: '#ef4444' }}>− {mod.name || mod.slug}</div>
+          ))}
+          {configChanges.map(change => (
+            <div key={`cfg:${change.relPath}`} style={{ color: change.type === 'added' ? '#10b981' : change.type === 'removed' ? '#ef4444' : '#38bdf8' }}>
+              {change.type === 'added' ? '+' : change.type === 'removed' ? '−' : '~'} {change.relPath} (Config
+              {change.type === 'added' ? ', neu' : change.type === 'removed' ? ', wird nicht mehr geteilt' : change.type === 'mode' ? ', Überschreib-Einstellung' : ', geändert'}
+              {change.type !== 'removed' && change.forced ? ', immer überschreiben' : ''})
+            </div>
           ))}
           {diff.packs.map(pack => (
             <div key={`${pack.kind}:${pack.slug}`} style={{ color: pack.type === 'added' ? '#10b981' : pack.type === 'removed' ? '#ef4444' : '#38bdf8' }}>
@@ -576,7 +613,7 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
 
         {/* Welche Configs mitgehen, wird im Reiter Entwurf > Configs festgelegt */}
         <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '12px 0 4px 0', lineHeight: 1.4 }}>
-          Mitveröffentlichte Configs: <b>{getSyncedConfigFiles().length}</b>. Die Auswahl änderst du unter <b>Entwurf, Configs</b>.
+          Mitveröffentlichte Configs: <b>{getSyncedConfigFiles().length}</b>{getForcedConfigFiles().length > 0 && <> (<b>{getForcedConfigFiles().length}</b> davon bei jedem Start überschrieben)</>}. Die Auswahl änderst du unter <b>Entwurf, Configs</b>.
         </p>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '10px', fontSize: '13px', color: 'var(--text-main)', flexWrap: 'wrap' }}>

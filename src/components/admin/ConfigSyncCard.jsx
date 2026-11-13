@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Sliders, Search, RefreshCw, FileText, AlertCircle } from 'lucide-react';
+import { Sliders, Search, RefreshCw, FileText, AlertCircle, UploadCloud } from 'lucide-react';
+import { appConfirm, appAlert } from '../../utils/appDialog';
 
 const STORAGE_KEY = 'dp_launcher_config_sync_selection';
 const DEFAULT_SELECTION = ['wover/client.json'];
@@ -16,6 +17,24 @@ export function getSyncedConfigFiles() {
   }
 }
 
+const FORCE_KEY = 'dp_launcher_config_force_selection';
+
+// Configs, die bei den Spielern bei jedem Start überschrieben werden (alle anderen nur beim ersten Start)
+export function getForcedConfigFiles() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FORCE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveForcedConfigFiles(list) {
+  try {
+    localStorage.setItem(FORCE_KEY, JSON.stringify(list));
+  } catch {}
+}
+
 function saveSyncedConfigFiles(list) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
@@ -25,6 +44,7 @@ function saveSyncedConfigFiles(list) {
 export default function ConfigSyncCard() {
   const [availableConfigs, setAvailableConfigs] = useState([]);
   const [selectedConfigs, setSelectedConfigsState] = useState(getSyncedConfigFiles);
+  const [forcedConfigs, setForcedConfigs] = useState(getForcedConfigFiles);
   const [expanded, setExpanded] = useState(false);
   const [filter, setFilter] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -34,6 +54,58 @@ export default function ConfigSyncCard() {
     setSelectedConfigsState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       saveSyncedConfigFiles(next);
+      return next;
+    });
+  };
+
+  const [isUploading, setIsUploading] = useState(false);
+  const handleUpload = async () => {
+    const sure = await appConfirm(
+      `${selectedConfigs.length} Config-Datei(en) aus der Testinstanz werden direkt ins Modpack hochgeladen, ohne neue Modpack-Version und ohne Changelog. Bei den Spielern gelten sie beim nächsten Start (nur beim ersten Mal, außer „Immer überschreiben“ ist gesetzt).`,
+      { title: 'Configs jetzt hochladen?', confirmLabel: 'Hochladen', cancelLabel: 'Abbrechen' }
+    );
+    if (!sure) return;
+    setIsUploading(true);
+    try {
+      const res = await window.electronAPI.updateModpackConfigs({ selected: selectedConfigs, forced: forcedConfigs });
+      if (res?.success) {
+        appAlert(`${res.count} Config-Datei(en) hochgeladen${res.forced ? `, ${res.forced} davon bei jedem Start überschrieben` : ''}.`);
+      } else {
+        appAlert(res?.error || 'Die Configs konnten nicht hochgeladen werden.', { warning: true });
+      }
+    } catch (err) {
+      appAlert(err.message, { warning: true });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const toggleForced = (relPath, on) => {
+    setForcedConfigs(prev => {
+      const next = on ? [...prev.filter(p => p !== relPath), relPath] : prev.filter(p => p !== relPath);
+      saveForcedConfigFiles(next);
+      return next;
+    });
+  };
+
+  // Alle / keine der gerade angezeigten (gefilterten) Dateien
+  const selectShown = (on) => {
+    const shown = filtered.map(c => c.relPath);
+    setSelectedConfigs(prev => (on ? [...new Set([...prev, ...shown])] : prev.filter(p => !shown.includes(p))));
+    if (!on) {
+      setForcedConfigs(prev => {
+        const next = prev.filter(p => !shown.includes(p));
+        saveForcedConfigFiles(next);
+        return next;
+      });
+    }
+  };
+
+  const forceShown = (on) => {
+    const shown = filtered.map(c => c.relPath).filter(rel => selectedConfigs.includes(rel));
+    setForcedConfigs(prev => {
+      const next = on ? [...new Set([...prev, ...shown])] : prev.filter(p => !shown.includes(p));
+      saveForcedConfigFiles(next);
       return next;
     });
   };
@@ -69,6 +141,9 @@ export default function ConfigSyncCard() {
     return availableConfigs.filter(c => c.relPath.toLowerCase().includes(q) || c.name.toLowerCase().includes(q));
   }, [availableConfigs, filter]);
 
+  const shownSelected = filtered.filter(c => selectedConfigs.includes(c.relPath));
+  const allShownForced = shownSelected.length > 0 && shownSelected.every(c => forcedConfigs.includes(c.relPath));
+
   return (
     <div style={{ background: 'var(--bg-well)', border: '1px solid var(--border-card)', borderRadius: '14px', padding: '12px 16px', flexShrink: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
@@ -81,6 +156,18 @@ export default function ConfigSyncCard() {
             {selectedConfigs.length} {selectedConfigs.length === 1 ? 'Datei' : 'Dateien'} ausgewählt
           </span>
         </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={handleUpload}
+          disabled={isUploading || selectedConfigs.length === 0}
+          title="Die ausgewählten Configs direkt hochladen, ohne neue Modpack-Version"
+          style={{ fontSize: '12px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          {isUploading ? <RefreshCw size={13} className="spin" /> : <UploadCloud size={13} />}
+          Jetzt hochladen
+        </button>
         <button
           type="button"
           className="btn-secondary"
@@ -89,10 +176,11 @@ export default function ConfigSyncCard() {
         >
           {expanded ? 'Auswahl zuklappen' : 'Auswahl anpassen'}
         </button>
+        </div>
       </div>
 
       <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '6px 0 0 0', lineHeight: 1.4 }}>
-        Standardmäßig werden <b>keine</b> privaten Einstellungen oder Tastenbelegungen an Spieler übertragen. Beim Veröffentlichen werden nur die hier angehakten Mod-Configs geteilt.
+        Standardmäßig werden <b>keine</b> privaten Einstellungen oder Tastenbelegungen an Spieler übertragen. Beim Veröffentlichen werden nur die hier angehakten Mod-Configs geteilt. Sie gelten bei den Spielern <b>nur beim ersten Start</b>, danach gehören sie dem Spieler. Mit „Immer überschreiben“ wird eine einzelne Datei bei jedem Start wieder auf deinen Stand gesetzt.
       </p>
 
       {expanded && (
@@ -108,21 +196,30 @@ export default function ConfigSyncCard() {
                 style={{ width: '100%', padding: '6px 12px 6px 32px', fontSize: '12px', background: 'var(--bg-input)', border: '1px solid var(--border-card)', borderRadius: '999px', color: 'var(--text-main)', outline: 'none' }}
               />
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button type="button" className="btn-secondary" onClick={loadConfigs} disabled={isLoading} title="Configs neu einlesen" style={{ fontSize: '11px', padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                <RefreshCw size={11} className={isLoading ? 'spin' : ''} />
-                <span>Neu laden</span>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              <button type="button" className="btn-secondary" onClick={loadConfigs} disabled={isLoading} title="Configs neu einlesen" style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center' }}>
+                <RefreshCw size={12} className={isLoading ? 'spin' : ''} />
               </button>
+              <button type="button" className="btn-secondary" onClick={() => selectShown(true)} style={{ fontSize: '11px', padding: '4px 10px' }}>Alle</button>
+              <button type="button" className="btn-secondary" onClick={() => selectShown(false)} style={{ fontSize: '11px', padding: '4px 10px' }}>Keine</button>
               <button
                 type="button"
                 className="btn-secondary"
                 onClick={() => setSelectedConfigs(availableConfigs.filter(c => c.isRecommended).map(c => c.relPath))}
-                style={{ fontSize: '11px', padding: '4px 8px' }}
+                title="Nur die empfohlenen Configs auswählen"
+                style={{ fontSize: '11px', padding: '4px 10px' }}
               >
-                Nur empfohlene
+                Empfohlene
               </button>
-              <button type="button" className="btn-secondary" onClick={() => setSelectedConfigs([])} style={{ fontSize: '11px', padding: '4px 8px' }}>
-                Keine Configs teilen
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => forceShown(!allShownForced)}
+                disabled={shownSelected.length === 0}
+                title="Bei allen ausgewählten, angezeigten Dateien umschalten, ob sie bei jedem Start überschrieben werden"
+                style={{ fontSize: '11px', padding: '4px 10px', color: allShownForced ? '#f59e0b' : undefined }}
+              >
+                {allShownForced ? 'Nicht mehr überschreiben' : 'Immer überschreiben'}
               </button>
             </div>
           </div>
@@ -175,6 +272,22 @@ export default function ConfigSyncCard() {
                       </span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                      {isChecked && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleForced(cfg.relPath, !forcedConfigs.includes(cfg.relPath)); }}
+                          title="Bei jedem Start der Spieler wieder auf deinen Stand setzen (sonst nur beim ersten Start)"
+                          style={{
+                            fontSize: '10.5px', padding: '1px 8px', borderRadius: '999px', cursor: 'pointer', fontFamily: 'inherit',
+                            border: '1px solid ' + (forcedConfigs.includes(cfg.relPath) ? '#f59e0b' : 'var(--border-card)'),
+                            background: forcedConfigs.includes(cfg.relPath) ? '#f59e0b26' : 'transparent',
+                            color: forcedConfigs.includes(cfg.relPath) ? '#f59e0b' : 'var(--text-muted)',
+                            fontWeight: forcedConfigs.includes(cfg.relPath) ? 700 : 500
+                          }}
+                        >
+                          Immer überschreiben
+                        </button>
+                      )}
                       {cfg.category === 'shader' && (
                         <span className="badge badge-accent" style={{ fontSize: '10px', padding: '1px 6px' }}>Shader-Optionen</span>
                       )}

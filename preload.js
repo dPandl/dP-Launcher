@@ -134,6 +134,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getServerBackupInfo: () => ipcRenderer.invoke('modpack-get-server-backup-info'),
   restoreServerBackup: () => ipcRenderer.invoke('modpack-restore-server-backup'),
   launchModpackTest: () => ipcRenderer.invoke('modpack-launch-test'),
+  resetTestConfigs: () => ipcRenderer.invoke('modpack-reset-test-configs'),
+  getConfigChanges: (payload) => ipcRenderer.invoke('modpack-config-changes', payload),
+  updateModpackConfigs: (payload) => ipcRenderer.invoke('modpack-update-configs', payload),
   onModpackServerLog: (callback) => {
     const subscription = (event, line) => callback(line);
     ipcRenderer.on('modpack-server-log', subscription);

@@ -1628,7 +1628,9 @@ function collectModpackConfigs(configDir) {
   return configs;
 }
 
-function applyModpackConfigs(configs, targetConfigDir, targetGameDir = null) {
+// Configs werden nur geschrieben, wenn es die Datei noch nicht gibt (erster Start).
+// Dateien in forced werden bei jedem Start überschrieben.
+function applyModpackConfigs(configs, targetConfigDir, targetGameDir = null, forced = new Set()) {
   if (!configs || typeof configs !== 'object') return;
   try {
     const gameBase = targetGameDir || path.resolve(targetConfigDir, '..');
@@ -1649,6 +1651,7 @@ function applyModpackConfigs(configs, targetConfigDir, targetGameDir = null) {
       if (!fs.existsSync(parentDir)) {
         fs.mkdirSync(parentDir, { recursive: true });
       }
+      if (fs.existsSync(targetFile) && !forced.has(relPath) && !forced.has(normalized)) continue;
       fs.writeFileSync(targetFile, content, 'utf8');
     }
     ensureWoverWelcomeDisabled(targetConfigDir);
@@ -2500,7 +2503,7 @@ handleAdmin('modpack-get-available-configs', async () => {
   }
 });
 
-handleAdmin('modpack-publish', async (event, { bumpType = 'patch', customVersion = '', changelog = '', title = '', selectedConfigFiles = null } = {}) => {
+handleAdmin('modpack-publish', async (event, { bumpType = 'patch', customVersion = '', changelog = '', title = '', selectedConfigFiles = null, forcedConfigFiles = [] } = {}) => {
   const config = getGithubConfig();
   try {
     if (!config.token) throw new Error('Es ist noch kein GitHub-Token hinterlegt.');
@@ -2644,6 +2647,11 @@ handleAdmin('modpack-publish', async (event, { bumpType = 'patch', customVersion
       }
     }
 
+    // Nur Dateien, die wirklich mitgehen, können als „immer überschreiben“ gelten
+    const configForce = (Array.isArray(forcedConfigFiles) ? forcedConfigFiles : [])
+      .map(rel => String(rel).replace(/\\/g, '/'))
+      .filter(rel => Object.prototype.hasOwnProperty.call(collectedConfigs, rel));
+
     const manifest = {
       schemaVersion: 2,
       serverName: remote?.serverName ?? draft.serverName,
@@ -2661,6 +2669,7 @@ handleAdmin('modpack-publish', async (event, { bumpType = 'patch', customVersion
       admins: remote?.admins || [],
       cleanOldMods: draft.cleanOldMods !== false,
       configs: collectedConfigs,
+      ...(configForce.length > 0 ? { configForce } : {}),
       mods: activeMods,
       resourcepacks: (draft.resourcepacks || []).filter(r => !r.disabled),
       shaderpacks: (draft.shaderpacks || []).filter(s => !s.disabled),
@@ -5451,17 +5460,19 @@ async function syncModsToDir(manifest, modsDir, keepFiles = new Set()) {
       await syncPacksToDir(shaderpacks, spDir, 'Shader');
     }
 
-    if (manifest.defaultShader) {
-      applyDefaultShader(gameBaseDir, manifest.defaultShader);
-    }
-
     // Config-Sync: Vordefinierte Mod-Konfigurationen schreiben & Wover Welcome-Screen deaktivieren
     const targetConfigDir = path.resolve(modsDir, '..', 'config');
     if (manifest.configs && typeof manifest.configs === 'object' && Object.keys(manifest.configs).length > 0) {
       setGameStatus('preparing', 'Mod-Konfigurationen werden abgeglichen...', 94);
-      applyModpackConfigs(manifest.configs, targetConfigDir, gameBaseDir);
+      applyModpackConfigs(manifest.configs, targetConfigDir, gameBaseDir, new Set(Array.isArray(manifest.configForce) ? manifest.configForce : []));
     } else {
       ensureWoverWelcomeDisabled(targetConfigDir);
+    }
+
+    // Der Standard-Shader gilt nur beim ersten Start und nur, wenn die Configs keine iris.properties mitbringen.
+    // Danach gehört die Shader-Auswahl dem Spieler.
+    if (manifest.defaultShader && !fs.existsSync(path.join(gameBaseDir, 'config', 'iris.properties'))) {
+      applyDefaultShader(gameBaseDir, manifest.defaultShader);
     }
 
     setGameStatus('preparing', 'Spieldateien vorbereitet...', 95);
@@ -6122,6 +6133,118 @@ ipcMain.handle('launch-game', (event, launchConfig) => {
 
 // Startet den gespeicherten Entwurf in einer eigenen Instanz. Assets, Bibliotheken und
 // Versionen werden geteilt, Mods, Einstellungen und Welten liegen getrennt.
+// Wohin eine Config aus dem Entwurf in der Instanz geschrieben wird (gleiche Regel wie applyModpackConfigs)
+function testConfigTarget(instanceDir, relPath) {
+  const safeRel = path.normalize(String(relPath)).replace(/^(\.\.[\/\\])+/, '');
+  const normalized = safeRel.replace(/\\/g, '/');
+  const inGameRoot = normalized.startsWith('shaderpacks/') || normalized === 'options.txt' || normalized.startsWith('config/');
+  return inGameRoot ? path.join(instanceDir, safeRel) : path.join(instanceDir, 'config', safeRel);
+}
+
+// Configs direkt im Manifest aktualisieren, ohne neue Modpack-Version und ohne Changelog.
+// Die Spieler bekommen sie beim nächsten Start (Regel: nur beim ersten Mal, außer „immer überschreiben“).
+handleAdmin('modpack-update-configs', async (event, { selected = [], forced = [] } = {}) => {
+  const config = getGithubConfig();
+  try {
+    if (!config.token) throw new Error('Es ist noch kein GitHub-Token hinterlegt.');
+    const baseDir = [path.join(gameDir, testInstanceSubDir), getInstanceDir(), path.join(process.cwd(), 'instances', 'modpack-test')]
+      .find(dir => fs.existsSync(dir));
+    if (!baseDir) throw new Error('Die Testinstanz wurde nicht gefunden.');
+
+    const collected = {};
+    for (const rel of Array.isArray(selected) ? selected : []) {
+      if (!rel || typeof rel !== 'string') continue;
+      const file = testConfigTarget(baseDir, rel);
+      if (!fs.existsSync(file) || !fs.statSync(file).isFile()) continue;
+      try { collected[String(rel).replace(/\\/g, '/')] = fs.readFileSync(file, 'utf8'); } catch (_e) { /* Datei überspringen */ }
+    }
+    const configForce = (Array.isArray(forced) ? forced : [])
+      .map(rel => String(rel).replace(/\\/g, '/'))
+      .filter(rel => Object.prototype.hasOwnProperty.call(collected, rel));
+
+    const endpoint = `/repos/${config.owner}/${config.repo}/contents/${MANIFEST_FILE}`;
+    const current = await githubRequest(`${endpoint}?ref=${encodeURIComponent(config.branch)}`);
+    if (current.status === 404) throw new Error('Im Repository gibt es noch kein Manifest. Veröffentliche zuerst das Modpack.');
+    if (!current.ok) throw new Error(describeGithubError(current, config));
+    const remote = JSON.parse(Buffer.from(current.data.content, 'base64').toString('utf8'));
+
+    const manifest = { ...remote, configs: collected };
+    if (configForce.length > 0) manifest.configForce = configForce; else delete manifest.configForce;
+    const put = await githubRequest(endpoint, {
+      method: 'PUT',
+      body: {
+        message: 'server: Configs',
+        content: Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf8').toString('base64'),
+        branch: config.branch,
+        sha: current.data.sha
+      }
+    });
+    if (!put.ok) throw new Error(describeGithubError(put, config));
+    try { writeJsonFile(manifestCachePath(), manifest); } catch (_e) { /* Cache ist nur eine Zugabe */ }
+    return { success: true, count: Object.keys(collected).length, forced: configForce.length };
+  } catch (err) {
+    console.error('Configs veröffentlichen fehlgeschlagen:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Welche ausgewählten Configs gegenüber dem veröffentlichten Stand neu, geändert oder entfernt sind
+handleAdmin('modpack-config-changes', async (event, { selected = [], forced = [] } = {}) => {
+  try {
+    const published = readJsonFile(manifestCachePath()) || {};
+    const pubConfigs = published.configs && typeof published.configs === 'object' ? published.configs : {};
+    const pubForce = new Set(Array.isArray(published.configForce) ? published.configForce : []);
+    const baseDir = [path.join(gameDir, testInstanceSubDir), getInstanceDir(), path.join(process.cwd(), 'instances', 'modpack-test'), process.cwd()]
+      .find(dir => fs.existsSync(dir));
+    const changes = [];
+    const handled = new Set();
+    for (const rel of Array.isArray(selected) ? selected : []) {
+      if (!rel || typeof rel !== 'string' || !baseDir) continue;
+      const key = String(rel).replace(/\\/g, '/');
+      const file = testConfigTarget(baseDir, rel);
+      if (!fs.existsSync(file) || !fs.statSync(file).isFile()) continue;
+      handled.add(key);
+      let content;
+      try { content = fs.readFileSync(file, 'utf8'); } catch (_e) { continue; }
+      const nowForced = (Array.isArray(forced) ? forced : []).includes(rel);
+      if (!(key in pubConfigs)) changes.push({ relPath: key, type: 'added', forced: nowForced });
+      else if (pubConfigs[key] !== content) changes.push({ relPath: key, type: 'changed', forced: nowForced });
+      else if (pubForce.has(key) !== nowForced) changes.push({ relPath: key, type: 'mode', forced: nowForced });
+    }
+    for (const key of Object.keys(pubConfigs)) {
+      if (!handled.has(key) && !(Array.isArray(selected) ? selected : []).some(rel => String(rel).replace(/\\/g, '/') === key)) {
+        changes.push({ relPath: key, type: 'removed' });
+      }
+    }
+    return { success: true, changes };
+  } catch (err) {
+    return { success: false, error: err.message, changes: [] };
+  }
+});
+
+// Setzt die Configs der Testinstanz auf den Stand des Entwurfs zurück
+handleAdmin('modpack-reset-test-configs', async () => {
+  try {
+    if (activeMinecraftProcess || currentGameStatus.status !== 'idle') {
+      return { success: false, error: 'Beende Minecraft zuerst, dann lassen sich die Configs zurücksetzen.' };
+    }
+    const draft = readJsonFile(modpackDraftPath());
+    const instanceDir = path.join(gameDir, testInstanceSubDir);
+    const entries = Object.entries(draft?.configs || {}).filter(([, content]) => typeof content === 'string');
+    let count = 0;
+    for (const [relPath, content] of entries) {
+      const target = testConfigTarget(instanceDir, relPath);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, content, 'utf8');
+      count++;
+    }
+    if (draft?.defaultShader) applyDefaultShader(instanceDir, draft.defaultShader);
+    return { success: true, count };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 handleAdmin('modpack-launch-test', async () => {
   if (activeMinecraftProcess || currentGameStatus.status !== 'idle') {
     return { success: false, error: 'Minecraft läuft bereits oder wird gerade gestartet.' };
@@ -6134,7 +6257,10 @@ handleAdmin('modpack-launch-test', async () => {
 
   setGameStatus('preparing', 'Mods der Testinstanz werden abgeglichen...', 5);
   const instanceDir = path.join(gameDir, testInstanceSubDir);
-  const sync = await syncModsToDir({ ...draft, cleanOldMods: true }, path.join(instanceDir, 'mods'));
+  // Configs gelten wie bei den Spielern: nur beim ersten Mal, außer sie sind als „immer überschreiben“ markiert.
+  // So bleiben Änderungen im Spiel für eine Config-Voreinstellung erhalten.
+  const published = readJsonFile(manifestCachePath());
+  const sync = await syncModsToDir({ ...draft, cleanOldMods: true, configForce: published?.configForce || [] }, path.join(instanceDir, 'mods'));
   if (!sync.success) {
     setGameStatus('idle', '', 0);
     return sync;
