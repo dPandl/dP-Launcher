@@ -911,7 +911,7 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: '12px', overflow: 'hidden' }}>
             <ConfigSyncCard />
             <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              <LocalConfigEditor />
+              <LocalConfigEditor target="test" />
             </div>
           </div>
         )}

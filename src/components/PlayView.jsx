@@ -463,7 +463,7 @@ export default function PlayView({ manifest, activeSeason, settings, account, on
               >
                 {serverPing.online ? (
                   <>
-                    <CheckCircle2 size={13} /> Online ({serverPing.players?.online || 0}/{serverPing.players?.max || 20})
+                    <CheckCircle2 size={13} /> Online{serverPing.players ? ` (${serverPing.players.online}/${serverPing.players.max})` : ''}
                   </>
                 ) : (
                   <>

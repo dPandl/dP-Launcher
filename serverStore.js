@@ -54,6 +54,21 @@ export function parseGithubRef(value) {
   return { owner, repo };
 }
 
+// Adresse der Live-Karte (BlueMap, Dynmap ...): nur http(s), ohne Zugangsdaten. Leer = keine Karte, ungültig = leer.
+export function normalizeMapUrl(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  let url;
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
+  } catch (_e) {
+    return '';
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+  if (url.username || url.password || !url.hostname) return '';
+  return url.href.length <= 300 ? url.href : '';
+}
+
 // Adresse im Format host oder host:port
 export function isValidServerAddress(value) {
   const address = String(value ?? '').trim();
@@ -106,7 +121,12 @@ export function sanitizeServerInput(input) {
 
   const banner = isValidBannerDataUrl(input?.banner) ? input.banner : '';
 
-  return { ok: true, server: { name, description, banner, address, owner, repo, branch, chatPort } };
+  const mapUrl = normalizeMapUrl(input?.mapUrl);
+  if (cleanText(input?.mapUrl) && !mapUrl) {
+    return { ok: false, error: 'Die Karten-Adresse ist ungültig (Beispiel: http://mc.beispiel.de:8100).' };
+  }
+
+  return { ok: true, server: { name, description, banner, mapUrl, address, owner, repo, branch, chatPort } };
 }
 
 // Ordnername im Instanz-Verzeichnis: der Servername, bereinigt und eindeutig
@@ -134,6 +154,7 @@ export function createServerRecord(clean, takenFolders) {
     name: clean.name,
     description: clean.description || '',
     banner: clean.banner || '',
+    mapUrl: clean.mapUrl || '',
     folder: folderNameFor(clean.name, takenFolders),
     address: clean.address,
     owner: clean.owner,
@@ -157,6 +178,7 @@ export function buildServerFile(server, nameOverride, descriptionOverride, banne
   if (description) file.description = description;
   const banner = bannerOverride ?? server.banner;
   if (isValidBannerDataUrl(banner)) file.banner = banner;
+  if (normalizeMapUrl(server.mapUrl)) file.mapUrl = normalizeMapUrl(server.mapUrl);
   if (server.owner && server.repo) {
     file.modpack = { github: `${server.owner}/${server.repo}`, branch: server.branch || 'main' };
   }
@@ -183,6 +205,7 @@ export function parseServerFile(text) {
     name: data.name,
     description: data.description,
     banner: data.banner,
+    mapUrl: data.mapUrl,
     address: data.address,
     github: data.modpack?.github,
     branch: data.modpack?.branch,

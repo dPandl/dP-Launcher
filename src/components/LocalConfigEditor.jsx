@@ -5,7 +5,8 @@ import {
 } from 'lucide-react';
 import { appConfirm, appAlert } from '../utils/appDialog';
 
-export default function LocalConfigEditor() {
+// target 'test': Configs der Testinstanz (Server-Admin). Ohne Angabe: Configs des Spielers.
+export default function LocalConfigEditor({ target } = {}) {
   const [configFiles, setConfigFiles] = useState([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [filterQuery, setFilterQuery] = useState('');
@@ -36,7 +37,7 @@ export default function LocalConfigEditor() {
     if (!window.electronAPI?.getLocalConfigFiles) return;
     setIsLoadingList(true);
     try {
-      const res = await window.electronAPI.getLocalConfigFiles();
+      const res = await window.electronAPI.getLocalConfigFiles(target);
       const files = (res && res.success && Array.isArray(res.files)) ? res.files : [];
       setConfigFiles(files);
 
@@ -103,7 +104,7 @@ export default function LocalConfigEditor() {
     setIsLoadingFile(true);
     setSaveSuccess(false);
     try {
-      const res = await window.electronAPI.readLocalConfigFile(file.path);
+      const res = await window.electronAPI.readLocalConfigFile(file.path, target);
       if (res && res.success) {
         setFileContent(res.content || '');
         setInitialContent(res.content || '');
@@ -125,7 +126,7 @@ export default function LocalConfigEditor() {
     setIsSaving(true);
     setSaveSuccess(false);
     try {
-      const res = await window.electronAPI.saveLocalConfigFile(selectedFile.path, fileContent);
+      const res = await window.electronAPI.saveLocalConfigFile(selectedFile.path, fileContent, target);
       if (res && res.success) {
         setInitialContent(fileContent);
         setSaveSuccess(true);
@@ -381,7 +382,9 @@ export default function LocalConfigEditor() {
             </div>
           ) : Object.keys(groupedFiles).length === 0 ? (
             <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: '12.5px' }}>
-              Keine Konfigurationsdateien gefunden.
+              {target === 'test'
+                ? 'Noch keine Configs in der Testinstanz. Starte „Lokal testen“ unter „Testen & Veröffentlichen“ einmal, damit die Mods ihre Configs anlegen.'
+                : 'Keine Konfigurationsdateien gefunden.'}
             </div>
           ) : (
             Object.entries(groupedFiles).map(([category, files]) => {

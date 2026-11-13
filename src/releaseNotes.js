@@ -1,5 +1,23 @@
 export const releaseNotes = [
   {
+    version: '0.1.4',
+    date: '13.11.2026',
+    title: 'Server-Chat mit Karte und schnellere Updates',
+    whatsNew: [
+      'Im Server-Chat wählst du den Server per Dropdown und wechselst zwischen Chat und Karte (zum Beispiel BlueMap)',
+      'Die Fabric-Version gilt nach der Auswahl im Server-Admin sofort für alle Spieler, ohne Changelog und ohne extra Schritt',
+      'Der Server-Admin kann einen Karten-Link für den Server hinterlegen'
+    ],
+    bugFixes: [
+      'Updates und der Java-Download laden deutlich schneller',
+      'Der Spielen-Knopf bleibt nach dem Beenden oder Abbrechen nicht mehr hängen',
+      'Die Server-Version im Server-Management ist jetzt korrekt, auch bei Servern mit SRV-Adresse',
+      'Der Config-Editor im Server-Admin öffnet den richtigen Ordner',
+      'Das Eintragen des Starbase-API-Keys setzt die App nicht mehr zurück'
+    ],
+    adjustments: []
+  },
+  {
     version: '0.1.3',
     date: '12.11.2026',
     title: 'Fabric-Version, Server-Adresse und ein Fix beim Spielstart',

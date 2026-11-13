@@ -30,7 +30,7 @@ function Dialog({ title, icon: Icon, onClose, children, busy }) {
   );
 }
 
-const EMPTY_FORM = { name: '', description: '', address: '', github: '', branch: 'main', chatPort: '' };
+const EMPTY_FORM = { name: '', description: '', address: '', github: '', branch: 'main', chatPort: '', mapUrl: '' };
 
 // Reiter Server: die Startseite des gewählten Servers, oben mit der Auswahl aller Server
 export default function ServersView({ settings, isAdmin = false, onImportFile, playViewProps }) {
@@ -71,7 +71,8 @@ export default function ServersView({ settings, isAdmin = false, onImportFile, p
       address: server.address,
       github: server.owner && server.repo ? `${server.owner}/${server.repo}` : '',
       branch: server.branch || 'main',
-      chatPort: server.chatPort || ''
+      chatPort: server.chatPort || '',
+      mapUrl: server.mapUrl || ''
     }
   });
 
@@ -269,6 +270,10 @@ export default function ServersView({ settings, isAdmin = false, onImportFile, p
             <div>
               <label style={labelStyle}>Chat-Port (optional)</label>
               <input type="text" inputMode="numeric" value={form.values.chatPort} onChange={(e) => setField('chatPort', e.target.value)} placeholder="Standard: 8899" style={{ width: '100%' }} />
+            </div>
+            <div>
+              <label style={labelStyle}>Karte (optional, BlueMap oder Dynmap)</label>
+              <input type="text" value={form.values.mapUrl || ''} onChange={(e) => setField('mapUrl', e.target.value)} placeholder="z. B. http://mc.beispiel.de:8100" style={{ width: '100%' }} />
             </div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>

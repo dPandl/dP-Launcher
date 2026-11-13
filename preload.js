@@ -60,10 +60,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportServer: (id, name, description, banner) => ipcRenderer.invoke('servers-export', { id, name, description, banner }),
   pickServerBanner: () => ipcRenderer.invoke('server-banner-pick'),
   readBanner: (ownerId) => ipcRenderer.invoke('banner-read', ownerId),
-  resetGameStatus: () => ipcRenderer.invoke('reset-game-status'),
   getFabricLoaderVersions: (gameVersion) => ipcRenderer.invoke('fabric-loader-versions', gameVersion),
   detectServerVersions: () => ipcRenderer.invoke('server-detect-versions'),
+  resetGameStatus: () => ipcRenderer.invoke('reset-game-status'),
   updateServerPresentation: (options) => ipcRenderer.invoke('modpack-update-presentation', options),
+  updateModpackVersion: (options) => ipcRenderer.invoke('modpack-update-version', options),
   pickServerFile: () => ipcRenderer.invoke('servers-import-pick'),
   takePendingServerFile: () => ipcRenderer.invoke('servers-take-pending-file'),
   onServersChanged: (callback) => {
@@ -184,9 +185,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Local Config Editor
-  getLocalConfigFiles: () => ipcRenderer.invoke('local-config-list'),
-  readLocalConfigFile: (filePath) => ipcRenderer.invoke('local-config-read', filePath),
-  saveLocalConfigFile: (filePath, content) => ipcRenderer.invoke('local-config-write', { path: filePath, content }),
+  getLocalConfigFiles: (target) => ipcRenderer.invoke('local-config-list', target),
+  readLocalConfigFile: (filePath, target) => ipcRenderer.invoke('local-config-read', filePath, target),
+  saveLocalConfigFile: (filePath, content, target) => ipcRenderer.invoke('local-config-write', { path: filePath, content, target }),
 
   // Utilities
   openExternal: (url) => ipcRenderer.invoke('open-external', url),

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Server, Shield, RotateCcw, Play, Square, Skull, Cpu, HardDrive,
   Trash2, CheckCircle2, RefreshCw, LogOut, Upload, Sparkles,
-  Box, Check, Activity, HelpCircle, Package, Search, Rocket, GitBranch, Sliders, Terminal, Settings, FileText
+  Box, Check, Activity, HelpCircle, Package, Search, Rocket, GitBranch, Sliders, Terminal, Settings, FileText, AlertCircle
 } from 'lucide-react';
 import { BisectService } from '../services/bisectService';
 import { createDraftFromManifest } from '../services/modpackService';
@@ -89,7 +89,8 @@ export default function AdminPanelView({
   const repositoryPanel = (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px', paddingBottom: '14px' }}>
       <AdminServerCard settings={settings} />
-      {draft && <GameVersionCard draft={draft} published={publishedManifest} onDraftChange={onDraftChange} />}
+
+      {draft && <GameVersionCard draft={draft} published={publishedManifest} onDraftChange={onDraftChange} onRefreshManifest={onRefreshManifest} />}
       <BisectCredentialsCard settings={settings} onUpdateSettings={onUpdateSettings} />
       <GithubSettingsCard />
       <ServerPresentationCard settings={settings} manifest={publishedManifest} onRefreshManifest={onRefreshManifest} />
@@ -976,7 +977,12 @@ export default function AdminPanelView({
                       const isStarting = serverStats?.current_state === 'starting';
                       const isStopping = serverStats?.current_state === 'stopping';
 
-                      const detectedVersion = serverPing?.version || manifest?.gameVersion || '26.3';
+                      // Version, die der Server selbst meldet. Ohne Antwort bleibt sie leer, es wird nichts erraten.
+                      const serverVersion = serverPing?.version || '';
+                      const packVersion = manifest?.gameVersion || '';
+                      const packLoader = manifest?.loader ? manifest.loader.charAt(0).toUpperCase() + manifest.loader.slice(1) : '';
+                      const versionsMatch = Boolean(serverVersion && packVersion && serverVersion.includes(packVersion));
+                      const pingFailed = isRunning && !serverPing?.version;
 
                       return (
                         <>
@@ -999,16 +1005,29 @@ export default function AdminPanelView({
                           <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-card)', paddingBottom: '8px' }}>
                             <span style={{ color: 'var(--text-muted)' }}>Server Version:</span>
                             <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>
-                              {detectedVersion}
+                              {serverVersion || (pingFailed ? 'nicht abrufbar' : '–')}
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-card)', paddingBottom: '8px' }}>
+                            <span style={{ color: 'var(--text-muted)' }}>Modpack der Spieler:</span>
+                            <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>
+                              {packVersion ? `${packVersion}${packLoader ? ` · ${packLoader}${manifest?.loaderVersion ? ` ${manifest.loaderVersion}` : ''}` : ''}` : '–'}
                             </span>
                           </div>
 
                           <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-card)', paddingBottom: '8px' }}>
                             <span style={{ color: 'var(--text-muted)' }}>Kompatibilität:</span>
-                            {isRunning ? (
+                            {isRunning && versionsMatch ? (
                               <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.4)' }}>
-                                <Check size={12} /> {detectedVersion} {manifest?.loader ? `${manifest.loader.charAt(0).toUpperCase() + manifest.loader.slice(1)} ` : ''}kompatibel
+                                <Check size={12} /> Passt: Minecraft {packVersion}
                               </span>
+                            ) : isRunning && serverVersion ? (
+                              <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#d97706', border: '1px solid rgba(245, 158, 11, 0.4)' }}>
+                                <AlertCircle size={12} /> Server {serverVersion}, Modpack {packVersion || '?'}
+                              </span>
+                            ) : isRunning ? (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Server läuft, Version nicht abrufbar</span>
                             ) : isStarting ? (
                               <span className="badge badge-accent">
                                 <RefreshCw size={12} className="spin" /> Server startet...
@@ -1021,7 +1040,7 @@ export default function AdminPanelView({
                           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                             <span style={{ color: 'var(--text-muted)' }}>Spieler Online:</span>
                             <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
-                              {serverPing?.players ? `${serverPing.players.online} / ${serverPing.players.max}` : '0 / 20'} Spieler
+                              {serverPing?.players ? `${serverPing.players.online} / ${serverPing.players.max} Spieler` : '–'}
                             </span>
                           </div>
                         </>

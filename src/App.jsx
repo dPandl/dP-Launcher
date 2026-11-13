@@ -428,7 +428,7 @@ export default function App() {
                   publishedManifest={adminManifest}
                   manifestReady={adminReady}
                   draft={draft}
-                  onUpdateSettings={setSettings}
+                  onUpdateSettings={updateSettings}
                   onDraftChange={handleDraftChange}
                   onPublished={handlePublished}
                   onRefreshManifest={refreshAdminManifest}

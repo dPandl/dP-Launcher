@@ -13,6 +13,7 @@ import { Auth } from 'msmc';
 import pkgMCLC from 'minecraft-launcher-core';
 const { Client: MCLCClient } = pkgMCLC;
 import net from 'net';
+import dns from 'dns';
 import { unzipSync, strFromU8 } from 'fflate';
 import {
   SERVER_FILE_EXTENSION,
@@ -21,6 +22,7 @@ import {
   SERVER_NAME_MAX,
   SERVER_DESCRIPTION_MAX,
   isValidServerAddress,
+  normalizeMapUrl,
   SERVER_FILE_MAX_CHARS,
   isPngBuffer,
   bannerToDataUrl,
@@ -208,7 +210,7 @@ const adminContext = new AsyncLocalStorage();
 
 function storedAdminServer() {
   return {
-    name: '', address: '', owner: '', repo: '', branch: 'main', description: '', banner: '',
+    name: '', address: '', owner: '', repo: '', branch: 'main', description: '', banner: '', mapUrl: '',
     ...(getSettings().adminServer || {})
   };
 }
@@ -299,7 +301,7 @@ function migrateAdminServer() {
     saveSettings({
       adminServer: {
         name: source.name || '', address: source.address || '', owner: source.owner, repo: source.repo,
-        branch: source.branch || 'main', description: source.description || '', banner: source.banner || ''
+        branch: source.branch || 'main', description: source.description || '', banner: source.banner || '', mapUrl: source.mapUrl || ''
       }
     });
     // Liegt das Banner des Servers schon als Datei vor, bekommt es auch der Admin-Server
@@ -537,6 +539,112 @@ function downloadFile(url, destPath, onProgress) {
     };
     request(url);
   });
+}
+
+// ─── Download mit mehreren Verbindungen ─────────────────────────────────────
+// GitHub drosselt einzelne Verbindungen oft auf unter 1 MB/s. Mit mehreren gleichzeitigen Teil-Downloads (Range)
+// steigt das Tempo auf ein Vielfaches. Ohne Range-Unterstützung läuft der normale Download.
+const PARALLEL_DOWNLOAD_HEADERS = { 'User-Agent': 'Electron-Minecraft-Launcher/1.0', 'Accept-Encoding': 'identity' };
+
+// Folgt den Weiterleitungen und fragt nach dem ersten Byte: liefert die endgültige Adresse und die Gesamtgröße,
+// oder null, wenn der Server keine Teil-Downloads kann.
+function probeRangeSupport(url, hops = 0) {
+  return new Promise((resolve) => {
+    let parsed;
+    try { parsed = new URL(url); } catch (_e) { return resolve(null); }
+    if (parsed.protocol !== 'https:') return resolve(null);
+    const req = https.get(url, { headers: { ...PARALLEL_DOWNLOAD_HEADERS, Range: 'bytes=0-0' } }, (res) => {
+      res.resume();
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && hops < 5) {
+        probeRangeSupport(new URL(res.headers.location, url).href, hops + 1).then(resolve);
+        return;
+      }
+      const total = Number(String(res.headers['content-range'] || '').split('/')[1]);
+      resolve(res.statusCode === 206 && Number.isFinite(total) && total > 0 ? { finalUrl: url, total } : null);
+    });
+    req.setTimeout(15000, () => req.destroy());
+    req.on('error', () => resolve(null));
+  });
+}
+
+// Holt einen Teil der Datei. onBytes meldet laufend die empfangenen Bytes.
+function fetchRange(finalUrl, from, to, onBytes) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(finalUrl, { headers: { ...PARALLEL_DOWNLOAD_HEADERS, Range: `bytes=${from}-${to}` } }, (res) => {
+      if (res.statusCode !== 206) {
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode}`));
+        return;
+      }
+      const parts = [];
+      let received = 0;
+      res.on('data', (chunk) => { parts.push(chunk); received += chunk.length; onBytes(chunk.length); });
+      res.on('end', () => (received === to - from + 1
+        ? resolve({ buffer: Buffer.concat(parts), received })
+        : reject(Object.assign(new Error('Teil unvollständig'), { received }))));
+      res.on('error', (err) => reject(Object.assign(err, { received })));
+    });
+    req.setTimeout(30000, () => req.destroy(new Error('Zeitüberschreitung')));
+    req.on('error', reject);
+  });
+}
+
+async function downloadFileParallel(url, destPath, onProgress, { connections = 6, chunkSize = 4 * 1024 * 1024 } = {}) {
+  const probe = await probeRangeSupport(url);
+  if (!probe) return downloadFile(url, destPath, onProgress);
+
+  let { finalUrl } = probe;
+  const { total } = probe;
+  const chunks = [];
+  for (let position = 0; position < total; position += chunkSize) {
+    chunks.push([position, Math.min(position + chunkSize, total) - 1]);
+  }
+
+  const fd = fs.openSync(destPath, 'w');
+  let done = 0;
+  let lastPercent = -1;
+  let lastTime = 0;
+  const report = () => {
+    if (!onProgress) return;
+    const percent = Math.min(100, Math.round((done / total) * 100));
+    const now = Date.now();
+    if (percent === 100 || (percent !== lastPercent && now - lastTime > 80)) {
+      lastPercent = percent;
+      lastTime = now;
+      onProgress(percent);
+    }
+  };
+
+  let nextChunk = 0;
+  const worker = async () => {
+    while (nextChunk < chunks.length) {
+      const [from, to] = chunks[nextChunk++];
+      for (let attempt = 1; ; attempt++) {
+        let counted = 0;
+        try {
+          const { buffer } = await fetchRange(finalUrl, from, to, (bytes) => { counted += bytes; done += bytes; report(); });
+          fs.writeSync(fd, buffer, 0, buffer.length, from);
+          break;
+        } catch (err) {
+          done -= counted; // Fehlversuch zählt nicht zum Fortschritt
+          if (attempt >= 4) throw err;
+          // Die signierte Adresse kann ablaufen: neu auflösen
+          if (attempt === 2) {
+            const again = await probeRangeSupport(url);
+            if (again) finalUrl = again.finalUrl;
+          }
+          await new Promise(resolve => setTimeout(resolve, 400 * attempt));
+        }
+      }
+    }
+  };
+
+  try {
+    await Promise.all(Array.from({ length: Math.min(connections, chunks.length) }, worker));
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (fs.statSync(destPath).size !== total) throw new Error('Die heruntergeladene Datei ist unvollständig.');
 }
 
 function createWindow() {
@@ -875,24 +983,32 @@ ipcMain.handle('open-test-instance-dir', async () => {
 });
 
 // ─── Local Config Files (Spieler Config-Editor) ──────────────────────────────
-function safeResolveLocalConfigPath(relPath) {
+// target 'test': der Ordner der Testinstanz, in dem die Mods des Entwurfs laufen (Server-Admin).
+// Sonst der Ordner des Spielers, also der aktive Server oder eine eigene Instanz.
+function getConfigBaseDir(target) {
+  return target === 'test' ? path.join(gameDir, testInstanceSubDir) : getEditInstanceDir();
+}
+
+function safeResolveLocalConfigPath(relPath, target) {
   if (!relPath || typeof relPath !== 'string') throw new Error('Ungültiger Pfad');
   const cleanRel = relPath.replace(/\\/g, '/').replace(/^\/+/, '');
   if (cleanRel.includes('..')) throw new Error('Ungültiger Pfad (Traversal)');
-  const target = path.resolve(getEditInstanceDir(), cleanRel);
-  if (!target.startsWith(path.resolve(getEditInstanceDir()))) {
+  const baseDir = getConfigBaseDir(target);
+  const resolved = path.resolve(baseDir, cleanRel);
+  if (!resolved.startsWith(path.resolve(baseDir))) {
     throw new Error('Zugriff verweigert: Pfad liegt außerhalb des Spielverzeichnisses');
   }
-  return target;
+  return resolved;
 }
 
-ipcMain.handle('local-config-list', async () => {
+ipcMain.handle('local-config-list', async (event, target) => {
   try {
-    const configDir = path.join(getEditInstanceDir(), 'config');
+    const baseDir = getConfigBaseDir(target);
+    const configDir = path.join(baseDir, 'config');
     const result = [];
 
     // 1. options.txt im Hauptverzeichnis
-    const optionsPath = path.join(getEditInstanceDir(), 'options.txt');
+    const optionsPath = path.join(baseDir, 'options.txt');
     if (fs.existsSync(optionsPath)) {
       const stat = fs.statSync(optionsPath);
       result.push({
@@ -942,9 +1058,9 @@ ipcMain.handle('local-config-list', async () => {
   }
 });
 
-ipcMain.handle('local-config-read', async (event, relPath) => {
+ipcMain.handle('local-config-read', async (event, relPath, target) => {
   try {
-    const targetPath = safeResolveLocalConfigPath(relPath);
+    const targetPath = safeResolveLocalConfigPath(relPath, target);
     if (!fs.existsSync(targetPath)) {
       throw new Error(`Datei nicht gefunden: ${relPath}`);
     }
@@ -956,9 +1072,9 @@ ipcMain.handle('local-config-read', async (event, relPath) => {
   }
 });
 
-ipcMain.handle('local-config-write', async (event, { path: relPath, content }) => {
+ipcMain.handle('local-config-write', async (event, { path: relPath, content, target }) => {
   try {
-    const targetPath = safeResolveLocalConfigPath(relPath);
+    const targetPath = safeResolveLocalConfigPath(relPath, target);
     const parentDir = path.dirname(targetPath);
     if (!fs.existsSync(parentDir)) {
       fs.mkdirSync(parentDir, { recursive: true });
@@ -2278,6 +2394,7 @@ handleAdmin('modpack-publish', async (event, { bumpType = 'patch', customVersion
       schemaVersion: 2,
       serverName: remote?.serverName ?? draft.serverName,
       ...(remote?.serverDescription ? { serverDescription: remote.serverDescription } : {}),
+      ...(remote?.serverMapUrl ? { serverMapUrl: remote.serverMapUrl } : {}),
       ...(remote?.serverBanner ? { serverBanner: remote.serverBanner, serverBannerVersion: remote.serverBannerVersion || '' } : {}),
       serverAddress: getAdminServer().address || remote?.serverAddress || draft.serverAddress || '',
       gameVersion: draft.gameVersion,
@@ -2368,13 +2485,62 @@ function cleanPresentationText(value, max) {
 }
 
 // bannerAction: 'keep' | 'set' | 'remove'. Name und Beschreibung leer = nicht gesetzt (dann gilt die Serverdatei).
-handleAdmin('modpack-update-presentation', async (event, { serverName = '', serverDescription = '', bannerAction = 'keep', banner = '' } = {}) => {
+// Fabric-Version direkt im Manifest ändern, ohne neue Modpack-Version und ohne Changelog.
+// Die Minecraft-Version bleibt dabei gleich: ein Wechsel braucht neue Mods und geht nur mit dem Modpack.
+handleAdmin('modpack-update-version', async (event, { gameVersion = '', loaderVersion = '' } = {}) => {
+  const config = getGithubConfig();
+  try {
+    if (!config.token) throw new Error('Es ist noch kein GitHub-Token hinterlegt.');
+    const versionRe = /^[0-9A-Za-z._-]{1,32}$/;
+    const wantedGame = String(gameVersion || '').trim();
+    const wantedLoader = String(loaderVersion || '').trim();
+    if (!versionRe.test(wantedGame)) throw new Error('Ungültige Minecraft-Version.');
+    if (wantedLoader && !versionRe.test(wantedLoader)) throw new Error('Ungültige Fabric-Version.');
+
+    const endpoint = `/repos/${config.owner}/${config.repo}/contents/${MANIFEST_FILE}`;
+    const current = await githubRequest(`${endpoint}?ref=${encodeURIComponent(config.branch)}`);
+    if (current.status === 404) throw new Error('Im Repository gibt es noch kein Manifest. Veröffentliche zuerst das Modpack.');
+    if (!current.ok) throw new Error(describeGithubError(current, config));
+    const remote = JSON.parse(Buffer.from(current.data.content, 'base64').toString('utf8'));
+
+    if (remote.gameVersion && remote.gameVersion !== wantedGame) {
+      throw new Error(`Die Minecraft-Version ändert sich (${remote.gameVersion} → ${wantedGame}). Dafür brauchen die Spieler neue Mods, das geht nur über „Testen & Veröffentlichen“.`);
+    }
+
+    const manifest = { ...remote, gameVersion: wantedGame, loaderVersion: wantedLoader };
+    if (!wantedLoader) delete manifest.loaderVersion;
+    const put = await githubRequest(endpoint, {
+      method: 'PUT',
+      body: {
+        message: 'server: Fabric-Version',
+        content: Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf8').toString('base64'),
+        branch: config.branch,
+        sha: current.data.sha
+      }
+    });
+    if (!put.ok) throw new Error(describeGithubError(put, config));
+
+    try {
+      writeJsonFile(manifestCachePath(), manifest);
+    } catch (err) {
+      console.warn('Manifest-Cache konnte nicht geschrieben werden:', err.message);
+    }
+    return { success: true, manifest };
+  } catch (err) {
+    console.error('Version veröffentlichen fehlgeschlagen:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+handleAdmin('modpack-update-presentation', async (event, { serverName = '', serverDescription = '', bannerAction = 'keep', banner = '', serverMapUrl = '' } = {}) => {
   const config = getGithubConfig();
   try {
     if (!config.token) throw new Error('Es ist noch kein GitHub-Token hinterlegt.');
 
     const name = cleanPresentationText(serverName, 60);
     const description = cleanPresentationText(serverDescription, 140);
+    const mapUrl = normalizeMapUrl(serverMapUrl);
+    if (String(serverMapUrl || '').trim() && !mapUrl) throw new Error('Die Karten-Adresse ist ungültig (Beispiel: http://mc.beispiel.de:8100).');
 
     let bannerBuffer = null;
     if (bannerAction === 'set') {
@@ -2408,6 +2574,8 @@ handleAdmin('modpack-update-presentation', async (event, { serverName = '', serv
       delete manifest.serverBannerVersion;
     }
     if (!manifest.serverDescription) delete manifest.serverDescription;
+    if (mapUrl) manifest.serverMapUrl = mapUrl;
+    else delete manifest.serverMapUrl;
 
     // Das Manifest wird erst nach dem Banner geschrieben, damit es nie auf eine fehlende Datei zeigt
     const repoIsEmpty = !current.ok && await isGithubRepoEmpty(config);
@@ -2442,7 +2610,8 @@ handleAdmin('modpack-update-presentation', async (event, { serverName = '', serv
         displayName: name,
         description,
         banner: localBanner,
-        bannerRemove: false
+        bannerRemove: false,
+        mapUrl
       }
     });
     notifyAdminServerChanged();
@@ -3474,7 +3643,7 @@ function formatServerPingResult(parsed) {
   const rawName = parsed.version?.name ? String(parsed.version.name).trim() : '';
   const proto = parsed.version?.protocol;
   // Der Server bestimmt die Version (z. B. "26.3" oder "1.21.1")
-  const mcVersion = rawName || (proto && PROTOCOL_MAP[proto]) || '1.21.1';
+  const mcVersion = rawName || (proto && PROTOCOL_MAP[proto]) || '';
 
   return {
     online: true,
@@ -3610,7 +3779,7 @@ function notifyAdminServerChanged() {
 }
 
 // Entwurf der Darstellung (Name, Beschreibung, Banner) lokal speichern, unabhängig vom Veröffentlichen
-ipcMain.handle('admin-presentation-save', (event, { displayName = '', description = '', banner, bannerRemove = false } = {}) => {
+ipcMain.handle('admin-presentation-save', (event, { displayName = '', description = '', banner, bannerRemove = false, mapUrl = '' } = {}) => {
   const clean = (value, max) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
   const stored = storedAdminServer();
   let bannerHash = stored.banner || '';
@@ -3626,7 +3795,9 @@ ipcMain.handle('admin-presentation-save', (event, { displayName = '', descriptio
       displayName: clean(displayName, SERVER_NAME_MAX),
       description: clean(description, SERVER_DESCRIPTION_MAX),
       banner: bannerHash,
-      bannerRemove: Boolean(bannerRemove)
+      bannerRemove: Boolean(bannerRemove),
+      // Eine ungültige Adresse wird nicht gespeichert, die Oberfläche zeigt sie rot an
+      mapUrl: normalizeMapUrl(mapUrl) || (String(mapUrl || '').trim() ? stored.mapUrl || '' : '')
     }
   });
   notifyAdminServerChanged();
@@ -3689,6 +3860,7 @@ ipcMain.handle('servers-update', (event, { id, data }) => {
     ...current,
     name: clean.server.name,
     description: clean.server.description,
+    mapUrl: clean.server.mapUrl,
     address: clean.server.address,
     owner: clean.server.owner,
     repo: clean.server.repo,
@@ -4157,15 +4329,38 @@ ipcMain.handle('modpack-install-mrpack', async (event, { versionId, projectId, p
   }
 });
 
+// Löst eine Adresse so auf wie der Minecraft-Client: Ohne Port wird der SRV-Eintrag _minecraft._tcp.<Host> gelesen
+// (viele Hoster nutzen damit einen anderen Port als 25565). Mit Port oder IP bleibt es bei der Eingabe.
+async function resolveMinecraftAddress(address) {
+  const raw = String(address || '').trim();
+  const colon = raw.lastIndexOf(':');
+  const hasPort = colon > -1 && /^\d{1,5}$/.test(raw.slice(colon + 1));
+  let host = hasPort ? raw.slice(0, colon) : raw;
+  let port = hasPort ? parseInt(raw.slice(colon + 1), 10) : 25565;
+
+  if (!hasPort && host && !net.isIP(host)) {
+    try {
+      const records = await Promise.race([
+        dns.promises.resolveSrv(`_minecraft._tcp.${host}`),
+        new Promise((_resolve, reject) => setTimeout(() => reject(new Error('Zeitüberschreitung')), 3000))
+      ]);
+      if (Array.isArray(records) && records.length > 0) {
+        records.sort((a, b) => a.priority - b.priority || b.weight - a.weight);
+        host = records[0].name.replace(/\.$/, '');
+        port = records[0].port;
+      }
+    } catch (_e) { /* kein SRV-Eintrag: Standardport */ }
+  }
+  return { host, port };
+}
+
 ipcMain.handle('check-server-status', async (event, targetAddress) => {
   const settings = getSettings();
   const address = targetAddress || getActiveServer()?.address || settings.serverIp;
   if (!address) {
     return { success: false, online: false, error: 'Keine Server-Adresse hinterlegt' };
   }
-  const parts = address.trim().split(':');
-  const host = parts[0];
-  const port = parseInt(parts[1] || '25565', 10);
+  const { host, port } = await resolveMinecraftAddress(address);
 
   // 1. Zuerst direkter Minecraft TCP-Ping vom Rechner des Spielers
   try {
@@ -4176,12 +4371,12 @@ ipcMain.handle('check-server-status', async (event, targetAddress) => {
         online: true,
         ip: host,
         port: port,
-        version: directResult.version || '1.21.1',
+        version: directResult.version || '',
         rawVersion: directResult.rawVersion,
-        protocol: directResult.protocol || 767,
-        players: directResult.players || { online: 0, max: 20 },
-        motd: directResult.motd || ['Minecraft Server'],
-        software: 'Fabric'
+        protocol: directResult.protocol || null,
+        players: directResult.players || null,
+        motd: directResult.motd || [],
+        software: ''
       };
     }
   } catch (directErr) {
@@ -4211,11 +4406,13 @@ ipcMain.handle('check-server-status', async (event, targetAddress) => {
             state: state,
             ip: host,
             port: port,
-            version: '1.21.1',
-            protocol: 767,
-            players: { online: 0, max: 20 },
-            motd: ['BisectHosting Community Server'],
-            software: 'Fabric (1.21.1)'
+            // Laut Panel läuft der Container, per Ping war der Server aber nicht abfragbar: Version und Spieler sind unbekannt
+            version: '',
+            protocol: null,
+            players: null,
+            motd: [],
+            software: '',
+            pingFailed: true
           };
         }
       }
@@ -4235,7 +4432,7 @@ ipcMain.handle('check-server-status', async (event, targetAddress) => {
       const protoVer = typeof data.protocol === 'number' ? data.protocol : data.protocol?.version;
       const protoName = data.protocol?.name || '';
       const rawVersion = typeof data.version === 'string' ? data.version.trim() : '';
-      const mcVersion = rawVersion || (protoVer && PROTOCOL_MAP[protoVer]) || protoName || '1.21.1';
+      const mcVersion = rawVersion || (protoVer && PROTOCOL_MAP[protoVer]) || protoName || '';
 
       if (data.online) {
         return {
@@ -4246,8 +4443,8 @@ ipcMain.handle('check-server-status', async (event, targetAddress) => {
           version: mcVersion,
           rawVersion: rawVersion,
           protocol: protoVer,
-          software: data.software || 'Fabric',
-          players: data.players || { online: 0, max: 20 },
+          software: data.software || '',
+          players: data.players || null,
           motd: data.motd ? (data.motd.clean || data.motd.raw || []) : []
         };
       }
@@ -4260,8 +4457,8 @@ ipcMain.handle('check-server-status', async (event, targetAddress) => {
     online: false,
     ip: host,
     port: port,
-    version: '1.21.1',
-    players: { online: 0, max: 20 }
+    version: '',
+    players: null
   };
 });
 
@@ -5190,7 +5387,7 @@ async function ensureJavaForGameVersion(gameVersion, configuredPath) {
     }
   };
 
-  await downloadFile(downloadUrl, tempArchive, onProgress);
+  await downloadFileParallel(downloadUrl, tempArchive, onProgress);
 
   setGameStatus('preparing', `Entpacke Java ${reqVer}...`, 85);
   sendLog(`[Launcher] Entpacke Java ${reqVer}...`);
@@ -5885,7 +6082,7 @@ ipcMain.handle('download-and-install-update', async (event, downloadUrl) => {
       // Installierte Version: Setup herunterladen, still ausführen, App startet danach neu
       const installerPath = path.join(tmpDir, 'dp-launcher-setup-update.exe');
       if (mainWindow) mainWindow.webContents.send('update-progress', 0);
-      await downloadFile(downloadUrl, installerPath, (percent) => {
+      await downloadFileParallel(downloadUrl, installerPath, (percent) => {
         if (mainWindow) mainWindow.webContents.send('update-progress', percent);
       });
       if (mainWindow) mainWindow.webContents.send('update-progress', 100);
@@ -5900,7 +6097,7 @@ ipcMain.handle('download-and-install-update', async (event, downloadUrl) => {
     if (fs.existsSync(extractDir)) fs.rmSync(extractDir, { recursive: true, force: true });
 
     if (mainWindow) mainWindow.webContents.send('update-progress', 0);
-    await downloadFile(downloadUrl, zipPath, (percent) => {
+    await downloadFileParallel(downloadUrl, zipPath, (percent) => {
       if (mainWindow) mainWindow.webContents.send('update-progress', percent);
     });
 

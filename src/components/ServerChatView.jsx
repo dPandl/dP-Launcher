@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Wifi, WifiOff, RefreshCw, Trash2, User, Sparkles, MessageSquare, AlertCircle, Key, Server, Power, Info, LogIn, LogOut } from 'lucide-react';
+import { Send, Wifi, WifiOff, RefreshCw, Trash2, User, Sparkles, MessageSquare, AlertCircle, Key, Server, Power, Info, LogIn, LogOut, Map as MapIcon, ExternalLink } from 'lucide-react';
 import { chatBridge } from '../services/chatBridgeService';
 import { appAlert } from '../utils/appDialog';
-import { resolveServerAddress, splitServerAddress, getActiveServer } from '../utils/serverAddress';
+import { resolveServerAddress, splitServerAddress, getActiveServer, getServers } from '../utils/serverAddress';
+import { normalizeMapUrl } from '../utils/mapUrl';
+import Dropdown from './common/Dropdown';
+import MapFrame from './common/MapFrame';
+import { openExternal } from './modrinth/modrinthUi';
 
 function parseSystemMessage(text) {
   const clean = (text || '')
@@ -53,6 +57,18 @@ function parseSystemMessage(text) {
 
 export default function ServerChatView({ account, settings, manifest, onOpenProfile }) {
   const serverAddress = resolveServerAddress(settings, manifest);
+  const [tab, setTab] = useState('chat'); // 'chat' | 'map'
+  const [mapReloadKey, setMapReloadKey] = useState(0);
+  const servers = getServers(settings);
+  const activeServer = getActiveServer(settings);
+  // Die Karten-Adresse aus dem Manifest auf GitHub gilt vor der aus der Serverdatei
+  const mapUrl = normalizeMapUrl(manifest?.serverMapUrl) || normalizeMapUrl(activeServer?.mapUrl);
+
+  const handleSelectServer = async (id) => {
+    if (!window.electronAPI || !id || id === activeServer?.id) return;
+    const res = await window.electronAPI.setActiveServer(id);
+    if (!res?.success) appAlert(res?.error || 'Der Server konnte nicht gewechselt werden.', { warning: true });
+  };
   const [messages, setMessages] = useState(() => chatBridge.getMessages());
   const [inputValue, setInputValue] = useState('');
   const [bridgeStatus, setBridgeStatus] = useState(chatBridge.status);
@@ -209,13 +225,27 @@ export default function ServerChatView({ account, settings, manifest, onOpenProf
               </div>
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-              Minecraft 26.3 • {serverAddress || 'keine Server-Adresse'} • Chat-Port {chatPort}
+              Minecraft {manifest?.gameVersion || '–'} • {serverAddress || 'keine Server-Adresse'} • Chat-Port {chatPort}
             </div>
           </div>
         </div>
 
         {/* Schnellaktionen oben rechts */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {servers.length > 0 && (
+            <Dropdown
+              value={activeServer?.id || ''}
+              onChange={(e) => handleSelectServer(e.target.value)}
+              aria-label="Server auswählen"
+              style={{ minWidth: '200px', maxWidth: '280px' }}
+            >
+              {servers.map(server => (
+                <option key={server.id} value={server.id}>{server.name}</option>
+              ))}
+            </Dropdown>
+          )}
+          {tab === 'chat' && (
+            <>
           <button
             type="button"
             className="btn-secondary"
@@ -237,8 +267,37 @@ export default function ServerChatView({ account, settings, manifest, onOpenProf
               <Trash2 size={13} />
             </button>
           )}
+            </>
+          )}
         </div>
       </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', flexShrink: 0 }}>
+        <div className="segmented-control">
+          <button type="button" className={`segmented-control-btn ${tab === 'chat' ? 'active' : ''}`} onClick={() => setTab('chat')}>
+            <MessageSquare size={15} /> Chat
+          </button>
+          <button type="button" className={`segmented-control-btn ${tab === 'map' ? 'active' : ''}`} onClick={() => setTab('map')}>
+            <MapIcon size={15} /> Karte
+          </button>
+        </div>
+
+        {tab === 'map' && mapUrl && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+            <button type="button" className="btn-secondary" onClick={() => setMapReloadKey(key => key + 1)} title="Karte neu laden" style={{ padding: '7px 12px', fontSize: '12px' }}>
+              <RefreshCw size={13} />
+              <span>Neu laden</span>
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => openExternal(mapUrl)} title="Karte im Browser öffnen" style={{ padding: '7px 12px', fontSize: '12px' }}>
+              <ExternalLink size={13} />
+              <span>Im Browser öffnen</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Der Chat bleibt beim Wechsel zur Karte verbunden und behält seinen Verlauf */}
+      <div style={{ display: tab === 'chat' ? 'contents' : 'none' }}>
 
       {/* Hinweis zur Chat-Bridge Mod */}
       {!isBridgeConnected && (
@@ -532,6 +591,10 @@ export default function ServerChatView({ account, settings, manifest, onOpenProf
           </div>
         )}
       </div>
+
+      </div>
+
+      {tab === 'map' && <MapFrame url={mapUrl} serverName={activeServer?.name} reloadKey={mapReloadKey} />}
 
     </div>
   );

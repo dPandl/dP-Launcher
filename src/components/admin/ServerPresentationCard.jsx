@@ -3,6 +3,7 @@ import { Palette, CheckCircle2, AlertCircle, RefreshCw, UploadCloud, FileDown } 
 import ServerBannerField from '../common/ServerBannerField';
 import { resolveServerPresentation } from '../common/ServerHeading';
 import { getAdminServer } from '../../utils/serverAddress';
+import { normalizeMapUrl } from '../../utils/mapUrl';
 
 const labelStyle = { display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' };
 
@@ -12,6 +13,7 @@ export default function ServerPresentationCard({ settings, manifest, onRefreshMa
   const server = getAdminServer(settings);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [mapUrl, setMapUrl] = useState('');
   const [bannerData, setBannerData] = useState(''); // lokal gewähltes Bild (Data-URL)
   const [bannerDirty, setBannerDirty] = useState(false); // Bild wurde in dieser Sitzung neu gewählt oder entfernt
   const [bannerRemove, setBannerRemove] = useState(false); // Banner von GitHub beim Veröffentlichen entfernen
@@ -31,17 +33,19 @@ export default function ServerPresentationCard({ settings, manifest, onRefreshMa
       name: neverEdited ? (manifest?.serverName || '') : server.displayName,
       description: neverEdited ? (manifest?.serverDescription || server.description || '') : server.description,
       banner: server.banner || '',
-      bannerRemove: server.bannerRemove === true
+      bannerRemove: server.bannerRemove === true,
+      mapUrl: neverEdited ? (manifest?.serverMapUrl || server.mapUrl || '') : (server.mapUrl || '')
     };
     setName(initial.name);
     setDescription(initial.description);
+    setMapUrl(initial.mapUrl);
     setBannerData('');
     setBannerDirty(false);
     setBannerRemove(initial.bannerRemove);
     if (initial.banner && window.electronAPI?.readBanner) {
       window.electronAPI.readBanner(server.id).then(url => setBannerData(url || ''));
     }
-    lastSaved.current = JSON.stringify({ name: initial.name, description: initial.description, bannerDirty: false, bannerLen: 0, bannerRemove: initial.bannerRemove });
+    lastSaved.current = JSON.stringify({ name: initial.name, description: initial.description, bannerDirty: false, bannerLen: 0, bannerRemove: initial.bannerRemove, mapUrl: initial.mapUrl });
     ready.current = true;
     // Absichtlich nur beim Wechsel des Repositorys neu einlesen, sonst würden Eingaben überschrieben
   }, [server.owner, server.repo]);
@@ -49,7 +53,7 @@ export default function ServerPresentationCard({ settings, manifest, onRefreshMa
   // Jede Änderung wird kurz danach lokal gespeichert
   useEffect(() => {
     if (!ready.current || !window.electronAPI?.saveAdminPresentation) return undefined;
-    const serialized = JSON.stringify({ name, description, bannerDirty, bannerLen: bannerDirty ? bannerData.length : 0, bannerRemove });
+    const serialized = JSON.stringify({ name, description, bannerDirty, bannerLen: bannerDirty ? bannerData.length : 0, bannerRemove, mapUrl });
     if (serialized === lastSaved.current) return undefined;
     const timer = setTimeout(async () => {
       // Das Bild geht nur mit, wenn es neu gewählt oder entfernt wurde. Sonst bleibt die gespeicherte Datei.
@@ -57,13 +61,14 @@ export default function ServerPresentationCard({ settings, manifest, onRefreshMa
         displayName: name,
         description,
         banner: bannerDirty ? bannerData : undefined,
-        bannerRemove
+        bannerRemove,
+        mapUrl
       });
-      lastSaved.current = JSON.stringify({ name, description, bannerDirty: false, bannerLen: 0, bannerRemove });
+      lastSaved.current = JSON.stringify({ name, description, bannerDirty: false, bannerLen: 0, bannerRemove, mapUrl });
       setBannerDirty(false);
     }, 600);
     return () => clearTimeout(timer);
-  }, [name, description, bannerData, bannerDirty, bannerRemove]);
+  }, [name, description, bannerData, bannerDirty, bannerRemove, mapUrl]);
 
   const previewValue = bannerData || (bannerRemove ? '' : githubBanner);
 
@@ -76,7 +81,8 @@ export default function ServerPresentationCard({ settings, manifest, onRefreshMa
         serverName: name,
         serverDescription: description,
         bannerAction: bannerData ? 'set' : bannerRemove ? 'remove' : 'keep',
-        banner: bannerData
+        banner: bannerData,
+        serverMapUrl: mapUrl
       });
       if (res?.success) {
         setBannerRemove(false);
@@ -137,6 +143,21 @@ export default function ServerPresentationCard({ settings, manifest, onRefreshMa
             <span>{description.length}/140</span>
           </label>
           <textarea value={description} onChange={(e) => setDescription(e.target.value.replace(/\s+/g, ' '))} maxLength={140} rows={2} placeholder="Leer = Beschreibung aus der Serverdatei" style={{ width: '100%', resize: 'none' }} />
+        </div>
+        <div>
+          <label style={labelStyle}><span>Karte (BlueMap, Dynmap ...)</span></label>
+          <input
+            type="text"
+            value={mapUrl}
+            onChange={(e) => setMapUrl(e.target.value)}
+            placeholder="z. B. http://mc.beispiel.de:8100 (leer = keine Karte)"
+            style={{ width: '100%', borderColor: mapUrl.trim() && !normalizeMapUrl(mapUrl) ? '#ef4444' : undefined }}
+          />
+          <div style={{ fontSize: '12.5px', color: mapUrl.trim() && !normalizeMapUrl(mapUrl) ? '#dc2626' : 'var(--text-muted)', marginTop: '6px', lineHeight: 1.5 }}>
+            {mapUrl.trim() && !normalizeMapUrl(mapUrl)
+              ? 'Die Adresse ist ungültig. Erlaubt sind http:// und https://.'
+              : 'Die Spieler sehen die Karte im Server-Chat im Reiter „Karte“. BlueMap läuft meist auf Port 8100, Dynmap auf 8123.'}
+          </div>
         </div>
         <ServerBannerField
           label="Banner"
