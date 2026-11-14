@@ -61,7 +61,7 @@ try {
 
   // Changelog aus den Release Notes als Markdown für den GitHub Release
   const parseArray = (name, text) => {
-    const match = text.match(new RegExp(name + ':\s*\[([\s\S]*?)\]'));
+    const match = text.match(new RegExp(name + String.raw`:\s*\[([\s\S]*?)\]`));
     if (!match) return [];
     return match[1]
       .split(/,\s*\r?\n/)
