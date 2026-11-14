@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Map as MapIcon, RefreshCw } from 'lucide-react';
 
 // Live-Karte des Servers (BlueMap, Dynmap ...) in einem abgerundeten Rahmen.
@@ -6,6 +6,9 @@ import { Map as MapIcon, RefreshCw } from 'lucide-react';
 export default function MapFrame({ url, serverName, reloadKey = 0 }) {
   const [loaded, setLoaded] = useState(false);
   const [slow, setSlow] = useState(false);
+  const webviewRef = useRef(null);
+  // In der App läuft die Karte in einem webview (der Mauszeiger des TV-Modus erreicht sie nur so), im Browser in einem iframe
+  const useWebview = typeof window !== 'undefined' && Boolean(window.electronAPI);
 
   useEffect(() => {
     setLoaded(false);
@@ -14,6 +17,14 @@ export default function MapFrame({ url, serverName, reloadKey = 0 }) {
     const timer = setTimeout(() => setSlow(true), 12000);
     return () => clearTimeout(timer);
   }, [url, reloadKey]);
+
+  useEffect(() => {
+    const view = webviewRef.current;
+    if (!view) return undefined;
+    const done = () => setLoaded(true);
+    view.addEventListener('did-stop-loading', done);
+    return () => view.removeEventListener('did-stop-loading', done);
+  }, [url, reloadKey, useWebview]);
 
   if (!url) {
     return (
@@ -30,16 +41,27 @@ export default function MapFrame({ url, serverName, reloadKey = 0 }) {
 
   return (
     <div className="map-frame">
-      <iframe
-        key={reloadKey}
-        src={url}
-        title={`Karte von ${serverName || 'Server'}`}
-        sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-pointer-lock"
-        referrerPolicy="no-referrer"
-        allow="fullscreen"
-        onLoad={() => setLoaded(true)}
-        className="map-frame-iframe"
-      />
+      {useWebview ? (
+        <webview
+          key={reloadKey}
+          ref={webviewRef}
+          src={url}
+          partition="persist:server-map"
+          allowpopups="true"
+          className="map-frame-iframe map-frame-webview"
+        />
+      ) : (
+        <iframe
+          key={reloadKey}
+          src={url}
+          title={`Karte von ${serverName || 'Server'}`}
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-pointer-lock"
+          referrerPolicy="no-referrer"
+          allow="fullscreen"
+          onLoad={() => setLoaded(true)}
+          className="map-frame-iframe"
+        />
+      )}
 
       {!loaded && (
         <div className="map-frame-overlay">

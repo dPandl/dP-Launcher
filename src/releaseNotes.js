@@ -1,5 +1,24 @@
 export const releaseNotes = [
   {
+    version: '0.1.12',
+    date: '15.11.2026',
+    title: 'TV-Modus: der ganze Launcher mit Controller und Steam Deck bedienbar',
+    whatsNew: [
+      'Neuer TV-Modus (Knopf oben in der Titelleiste, Start oder Select am Controller): Vollbild, größere Oberfläche, ohne Titelleiste. Beenden mit Esc oder Start',
+      'Der ganze Launcher lässt sich mit Steuerkreuz, Stick, Tastatur und Controller bedienen: A wählt, B geht zurück, LB und RB wechseln den Reiter',
+      'Virtuelle Maus: Der rechte Stick bewegt den Zeiger, der rechte Trigger klickt, mit dem linken Trigger und dem rechten Stick wird gescrollt. Unter Windows folgt der Mauszeiger dem Controller',
+      'Die Server-Karte (BlueMap) wird nach einem Klick mit dem Controller gesteuert: linker Stick WASD, RT Linksklick, LT Rechtsklick, A Leertaste, B Shift, LB und RB scrollen, im Vollbild dreht der rechte Stick die Kamera. Start, Select oder Esc führen zurück',
+      'Bildschirmtastatur für Eingabefelder, mit dem Controller bedienbar und in den Einstellungen abschaltbar. Sie öffnet sich nur beim Anklicken oder mit A',
+      'Tastenhinweise mit den Symbolen deines Controllers (Xbox, PlayStation, Switch, Steam Deck oder Tastatur): Select halten blendet sie ein',
+      'Dialoge, Auswahlfelder und Schieberegler lassen sich mit dem Controller bedienen'
+    ],
+    bugFixes: [],
+    adjustments: [
+      'Im TV-Modus ist der Speichern-Knopf der Einstellungen ausgeblendet, gespeichert wird beim Verlassen des Reiters',
+      'Der Auswahl-Rahmen im TV-Modus hat die Themefarbe und ist auch auf bunten Knöpfen gut zu sehen'
+    ]
+  },
+  {
     version: '0.1.11',
     date: '14.11.2026',
     title: 'Steam Deck: Absturz im Desktop-Modus behoben',

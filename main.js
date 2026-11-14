@@ -668,6 +668,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Für die Server-Karte: ein webview ist vom Launcher getrennt und lässt sich mit dem virtuellen Mauszeiger bedienen
+      webviewTag: true,
       backgroundThrottling: true,
     },
     icon: path.join(__dirname, 'public', process.platform === 'win32' ? 'app-icon.ico' : 'app-icon.png'),
@@ -681,6 +683,24 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
   }
 }
+
+// Eingebettete Karten (webview): nur http(s), ohne Node und Preload, neue Fenster öffnen im Standard-Browser
+app.on('web-contents-created', (event, contents) => {
+  contents.on('will-attach-webview', (attachEvent, webPreferences, params) => {
+    delete webPreferences.preload;
+    delete webPreferences.preloadURL;
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    if (!/^https?:\/\//i.test(String(params.src))) attachEvent.preventDefault();
+  });
+  if (contents.getType() === 'webview') {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+      return { action: 'deny' };
+    });
+  }
+});
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -724,10 +744,78 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  try { warpShell?.kill(); } catch { /* egal */ }
   destroyTray();
 });
 
 // ─── Window Controls ────────────────────────────────────────────────────────
+// TV-Modus: die ganze Oberfläche größer darstellen
+ipcMain.handle('set-zoom-factor', (event, factor) => {
+  const value = Number(factor);
+  if (mainWindow && value >= 0.5 && value <= 3) mainWindow.webContents.setZoomFactor(value);
+});
+
+ipcMain.handle('set-fullscreen', (event, enabled) => {
+  if (mainWindow) mainWindow.setFullScreen(!!enabled);
+});
+
+// TV-Modus: virtuelle Maus. Echte Eingabe-Ereignisse, damit Hover, Klicken und Ziehen (Slider) wie bei einer Maus funktionieren
+ipcMain.on('tv-mouse', (event, { type, x, y, down = false, deltaY = 0 } = {}) => {
+  if (!mainWindow || !['mouseMove', 'mouseDown', 'mouseUp', 'mouseWheel'].includes(type)) return;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  const zoom = mainWindow.webContents.getZoomFactor();
+  const position = { x: Math.round(x * zoom), y: Math.round(y * zoom) };
+  if (type === 'mouseWheel') {
+    // Mausrad, zum Beispiel zum Zoomen in der eingebetteten Karte
+    const delta = Number(deltaY) || 0;
+    mainWindow.webContents.sendInputEvent({ type: 'mouseMove', ...position });
+    mainWindow.webContents.sendInputEvent({ type, ...position, deltaX: 0, deltaY: delta, wheelTicksX: 0, wheelTicksY: Math.sign(delta), canScroll: true });
+    return;
+  }
+  mainWindow.webContents.sendInputEvent({
+    type,
+    ...position,
+    button: 'left',
+    clickCount: type === 'mouseMove' ? 0 : 1,
+    // Beim Halten der Taste meldet die Bewegung "linke Taste gedrückt", sonst lassen sich Karte und Slider nicht ziehen
+    ...(type === 'mouseMove' && down ? { modifiers: ['leftButtonDown'] } : {})
+  });
+});
+
+// TV-Modus: Der Mauszeiger des Betriebssystems folgt dem virtuellen Zeiger des Controllers (nur Windows). Wer nach dem Stick
+// wieder zur Maus greift, findet sie dort, wo der Zeiger zuletzt war. Eine dauerhaft laufende PowerShell setzt die Position,
+// der erste Sprung braucht etwa eine Sekunde, danach geht es sofort.
+let warpShell = null;
+
+function ensureWarpShell() {
+  if (process.platform !== 'win32') return null;
+  if (!warpShell) {
+    warpShell = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '-'], { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
+    warpShell.on('exit', () => { warpShell = null; });
+    warpShell.on('error', () => { warpShell = null; });
+    warpShell.stdin.on('error', () => { /* Shell beendet */ });
+    warpShell.stdin.write('Add-Type -AssemblyName System.Windows.Forms, System.Drawing\n');
+  }
+  return warpShell;
+}
+
+function warpSystemCursor(x, y) {
+  if (process.platform !== 'win32' || !mainWindow || mainWindow.isMinimized()) return;
+  const bounds = mainWindow.getContentBounds();
+  const zoom = mainWindow.webContents.getZoomFactor();
+  // PowerShell arbeitet ohne eigene DPI-Anpassung in den Koordinaten, die Electron als DIP angibt
+  const px = Math.round(bounds.x + x * zoom);
+  const py = Math.round(bounds.y + y * zoom);
+  ensureWarpShell()?.stdin.write(`[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${px}, ${py})\n`);
+}
+
+// Beim Einschalten des TV-Modus vorab starten, damit der erste Sprung nicht erst nach einer Sekunde kommt
+ipcMain.on('tv-warp-prepare', () => { ensureWarpShell(); });
+
+ipcMain.on('tv-warp-cursor', (event, { x, y } = {}) => {
+  if (Number.isFinite(x) && Number.isFinite(y)) warpSystemCursor(x, y);
+});
+
 ipcMain.handle('window-minimize', () => {
   if (mainWindow) mainWindow.minimize();
 });

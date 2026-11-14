@@ -24,6 +24,10 @@ import { defaultManifest as defaultLocalManifest } from './defaultManifest';
 import ServersView from './components/ServersView';
 import InstancesView from './components/InstancesView';
 import GlobalBackButton from './components/common/GlobalBackButton';
+import TvHints from './components/common/TvHints';
+import TvCursor from './components/common/TvCursor';
+import TvKeyboard from './components/common/TvKeyboard';
+import { startTvNavigation, startTvToggleWatcher, setTvZoom } from './utils/tvNavigation';
 import ServerImportModal from './components/ServerImportModal';
 
 const CURRENT_VERSION = releaseNotes[0]?.version || '0.1.0';
@@ -270,6 +274,36 @@ export default function App() {
     });
   }, []);
 
+  // TV-Modus: größere Oberfläche und Steuerung mit Controller und Tastatur
+  const tvMode = settings.tvMode === true;
+  const tvWasOnRef = useRef(false);
+  useEffect(() => {
+    document.documentElement.classList.toggle('tv-mode', tvMode);
+    if (!tvMode) {
+      window.electronAPI?.setZoomFactor?.(1);
+      setTvZoom(1);
+      if (tvWasOnRef.current) window.electronAPI?.setFullscreen?.(false);
+      tvWasOnRef.current = false;
+      return undefined;
+    }
+    tvWasOnRef.current = true;
+    window.electronAPI?.setFullscreen?.(true);
+    // Je größer der Bildschirm, desto stärker die Vergrößerung (Steam Deck etwa 1,1, Full HD etwa 1,35)
+    const factor = Math.min(1.8, Math.max(1.1, 1.1 + (window.screen.width - 1280) / 1280 * 0.5));
+    window.electronAPI?.setZoomFactor?.(factor);
+    setTvZoom(factor);
+    const stop = startTvNavigation({ onExit: () => updateSettings({ tvMode: false }) });
+    return () => {
+      stop();
+      document.documentElement.classList.remove('tv-mode');
+    };
+  }, [tvMode]);
+
+  // Start oder Select am Controller schaltet den TV-Modus ein und aus
+  const tvModeRef = useRef(tvMode);
+  tvModeRef.current = tvMode;
+  useEffect(() => startTvToggleWatcher(() => updateSettings({ tvMode: !tvModeRef.current })), []);
+
   // Update-Prüfung: beim Start, danach alle paar Minuten und auf Knopfdruck im Changelog
   const checkForUpdates = async ({ manual = false } = {}) => {
     if (!window.electronAPI?.checkForUpdate) return;
@@ -384,11 +418,19 @@ export default function App() {
         isDark={activeSeason?.isDark}
       />
 
-      {/* Frameless Titlebar */}
-      <Titlebar
-        activeSeason={activeSeason}
-        currentVersion={CURRENT_VERSION}
-      />
+      {/* Frameless Titlebar. Im TV-Modus (Vollbild) entfällt sie, beendet wird er mit Esc oder Start */}
+      {!tvMode && (
+        <Titlebar
+          activeSeason={activeSeason}
+          currentVersion={CURRENT_VERSION}
+          tvMode={tvMode}
+          onToggleTv={() => updateSettings({ tvMode: !tvMode })}
+        />
+      )}
+
+      {tvMode && <TvHints />}
+      {tvMode && <TvCursor />}
+      {tvMode && settings.tvKeyboard !== false && <TvKeyboard />}
 
       {/* Haupt-Layout */}
       <div className="main-layout">
@@ -398,6 +440,7 @@ export default function App() {
           activeSeason={activeSeason}
           account={account}
           isAdmin={isAdmin}
+          tvMode={tvMode}
         />
 
         <div

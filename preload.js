@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteSkinHistoryItem: (id) => ipcRenderer.invoke('delete-skin-history-item', id),
 
   // Window Controls
+  setZoomFactor: (factor) => ipcRenderer.invoke('set-zoom-factor', factor),
+  setFullscreen: (enabled) => ipcRenderer.invoke('set-fullscreen', enabled),
+  tvMouse: (event) => ipcRenderer.send('tv-mouse', event),
+  tvWarpCursor: (position) => ipcRenderer.send('tv-warp-cursor', position),
+  tvWarpPrepare: () => ipcRenderer.send('tv-warp-prepare'),
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),

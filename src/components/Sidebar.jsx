@@ -1,7 +1,8 @@
 import React from 'react';
+import TvSidebarHints from './common/TvSidebarHints';
 import { Play, BookOpen, MessageSquare, Package, Settings, FileText, User, Shirt, ServerCog, Globe } from 'lucide-react';
 
-export default function Sidebar({ currentTab, setCurrentTab, activeSeason, account, isAdmin }) {
+export default function Sidebar({ currentTab, setCurrentTab, activeSeason, account, isAdmin, tvMode = false }) {
 
   const navItems = [
     { id: 'play', label: 'Spielen', icon: Play },
@@ -86,7 +87,8 @@ export default function Sidebar({ currentTab, setCurrentTab, activeSeason, accou
         )}
       </button>
 
-      {/* Saisonaler Infokasten */}
+      {/* Im TV-Modus zeigt der Kasten die Tastenhinweise, sonst das aktive Design */}
+      {tvMode ? <TvSidebarHints /> : (
       <div className="sidebar-season-pill">
         <img
           src={`${import.meta.env.BASE_URL}app-icon.png`}
@@ -102,6 +104,7 @@ export default function Sidebar({ currentTab, setCurrentTab, activeSeason, accou
           </div>
         </div>
       </div>
+      )}
     </aside>
   );
 }

@@ -1,0 +1,4 @@
+Controller- und Tastatur-Symbole: "Mr. Breakfast's Free Prompts"
+https://github.com/mr-breakfast/mrbreakfasts_free_prompts
+Lizenz: CC0 1.0 Universal (Public Domain), freie Verwendung ohne Namensnennung.
+Ausgewählte SVG-Dateien unverändert übernommen.

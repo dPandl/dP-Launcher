@@ -243,7 +243,8 @@ export default function SettingsView({ settings, setSettings, onReloadManifest }
       </div>
 
       {/* Speichern-Knopf unten rechts (zusätzlich wird beim Verlassen der Seite automatisch gespeichert) */}
-      {createPortal(
+      {/* Im TV-Modus entfällt er: Der Controller soll nicht in den Knopf laufen, gespeichert wird beim Verlassen des Reiters */}
+      {settings?.tvMode !== true && createPortal(
         <Fab
           icon={saved ? Check : Save}
           label={saved ? 'Gespeichert!' : 'Speichern'}
@@ -505,6 +506,56 @@ export default function SettingsView({ settings, setSettings, onReloadManifest }
                 position: 'absolute',
                 top: '2px',
                 left: formData.seasonalEffects !== false ? '22px' : '2px',
+                transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Schalter für die Bildschirmtastatur des TV-Modus */}
+        <div
+          onClick={() => setFormData(prev => ({ ...prev, tvKeyboard: !(prev.tvKeyboard !== false) }))}
+          style={{
+            marginTop: '16px',
+            paddingTop: '14px',
+            borderTop: '1px solid var(--border-card)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            cursor: 'pointer'
+          }}
+        >
+          <div>
+            <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text-main)' }}>
+              Bildschirmtastatur im TV-Modus
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+              Öffnet beim Anklicken eines Eingabefelds eine Tastatur, die sich mit dem Controller bedienen lässt. Praktisch, wenn dein Gerät keine eigene hat.
+            </div>
+          </div>
+          <div
+            style={{
+              width: '44px',
+              height: '24px',
+              borderRadius: '999px',
+              background: formData.tvKeyboard !== false ? 'var(--color-primary)' : 'var(--bg-well)',
+              border: '1px solid',
+              borderColor: formData.tvKeyboard !== false ? 'var(--color-primary)' : 'var(--border-card)',
+              position: 'relative',
+              transition: 'all 0.2s ease',
+              flexShrink: 0
+            }}
+          >
+            <div
+              style={{
+                width: '18px',
+                height: '18px',
+                borderRadius: '50%',
+                background: '#ffffff',
+                position: 'absolute',
+                top: '2px',
+                left: formData.tvKeyboard !== false ? '22px' : '2px',
                 transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
               }}

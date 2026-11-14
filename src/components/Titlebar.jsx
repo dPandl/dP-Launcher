@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Minus, Square, X } from 'lucide-react';
+import { Minus, Square, X, Tv } from 'lucide-react';
 
-export default function Titlebar({ activeSeason, currentVersion }) {
+export default function Titlebar({ activeSeason, currentVersion, tvMode = false, onToggleTv }) {
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
@@ -51,6 +51,14 @@ export default function Titlebar({ activeSeason, currentVersion }) {
       </div>
 
       <div className="titlebar-controls">
+        <button
+          className={`titlebar-btn ${tvMode ? 'active' : ''}`}
+          title={tvMode ? 'TV-Modus ausschalten' : 'TV-Modus einschalten (Controller und Tastatur)'}
+          aria-pressed={!!tvMode}
+          onClick={onToggleTv}
+        >
+          <Tv size={15} />
+        </button>
         <button
           className="titlebar-btn"
           title="Minimieren"

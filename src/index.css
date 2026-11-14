@@ -4638,6 +4638,9 @@ textarea:focus,
   display: block;
   background: #0b1020;
 }
+.map-frame-webview {
+  display: flex;
+}
 .map-frame-overlay {
   position: absolute;
   inset: 0;
@@ -4685,4 +4688,271 @@ textarea:focus,
 .ram-slider-warning {
   display: flex; gap: 8px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; font-size: 12.5px; line-height: 1.4;
   color: #f87171; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+/* ==========================================================================
+   TV-MODUS: Fokus-Rahmen für Controller und Tastatur, Hinweisleiste
+   ========================================================================== */
+.titlebar-btn.active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-text);
+}
+
+.tv-mode [data-tv-focus] {
+  /* Ring in der Themefarbe innen, dahinter ein Streifen in der Kartenfarbe: so bleibt er auch auf Verlaufs-Knöpfen
+     sichtbar und wird von überlaufenden Elternbereichen nie abgeschnitten */
+  outline: 3px solid var(--color-primary);
+  outline-offset: -3px;
+  box-shadow: inset 0 0 0 6px var(--bg-card), inset 0 0 24px 6px var(--color-glow);
+  position: relative;
+  z-index: 5;
+}
+
+.tv-mode [data-tv-editing] {
+  outline-style: dashed;
+  box-shadow: inset 0 0 26px var(--color-glow);
+}
+
+.tv-mode :focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: -3px;
+}
+
+.tv-hints {
+  position: fixed;
+  right: 16px;
+  bottom: 10px;
+  z-index: 150000;
+  display: flex;
+  gap: 10px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.tv-hint kbd {
+  font: inherit;
+  font-weight: 800;
+  padding: 1px 7px;
+  margin-right: 4px;
+  border-radius: 6px;
+  background: var(--bg-well);
+  color: var(--text-main);
+  border: 1px solid var(--border-card);
+}
+
+/* TV-Modus: virtuelle Maus im Theme-Verlauf */
+.tv-cursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 300000;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  will-change: transform;
+}
+
+.tv-cursor-visible {
+  opacity: 1;
+}
+
+.tv-cursor-icon {
+  position: absolute;
+  left: -3px;
+  top: -3px;
+  color: #fff;
+  fill: var(--color-primary);
+  stroke: #fff;
+  filter: drop-shadow(0 0 6px var(--color-glow)) drop-shadow(0 3px 6px rgba(0, 0, 0, 0.55));
+  transition: transform 0.12s ease;
+  transform-origin: 3px 3px;
+}
+
+.tv-cursor-ring {
+  position: absolute;
+  left: -18px;
+  top: -18px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--color-primary);
+  background: var(--color-primary-soft);
+  box-shadow: 0 0 18px var(--color-glow);
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.tv-cursor-down .tv-cursor-icon {
+  transform: scale(0.82);
+}
+
+.tv-cursor-down .tv-cursor-ring {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.tv-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tv-hint-icon {
+  height: 24px;
+  width: auto;
+  display: block;
+}
+
+/* TV-Modus: der System-Mauszeiger ist weg, es gibt nur den virtuellen Zeiger */
+html.tv-nocursor,
+html.tv-nocursor * {
+  cursor: none !important;
+}
+
+/* Karten-Modus: die Karte ist aktiv und wird mit dem Controller gesteuert */
+.tv-mode webview[data-tv-map-active] {
+  outline: 3px solid var(--color-primary);
+  outline-offset: -3px;
+  box-shadow: inset 0 0 28px var(--color-glow);
+}
+
+/* TV-Modus: Bildschirmtastatur */
+html.tv-osk-open .app-container {
+  padding-bottom: var(--tv-osk-h, 320px);
+}
+
+html.tv-osk-open .tv-hints {
+  display: none;
+}
+
+.tv-osk {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 250000;
+  padding: 12px 18px 10px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-card);
+  box-shadow: 0 -14px 40px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tv-osk-grid {
+  display: grid;
+  grid-template-columns: repeat(11, 1fr);
+  gap: 6px;
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.tv-osk-key {
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--border-card);
+  background: var(--bg-well);
+  color: var(--text-main);
+  font-size: 17px;
+  font-weight: 700;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tv-osk-key.tv-osk-on {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-text);
+  border-color: var(--color-primary-border);
+}
+
+.tv-osk-key[data-osk-focus] {
+  outline: 3px solid var(--color-primary);
+  outline-offset: -3px;
+  box-shadow: inset 0 0 0 6px var(--bg-card), inset 0 0 18px var(--color-glow);
+}
+
+.tv-osk-hints {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.tv-osk-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* TV-Modus: Tastenhinweise blenden weich ein und aus, die einzelnen Hinweise laufen nacheinander ein */
+.tv-hints {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(16px) scale(0.96);
+  transform-origin: 50% 100%;
+  transition: opacity 0.22s ease, transform 0.28s cubic-bezier(0.4, 0, 1, 1), visibility 0s linear 0.28s;
+  will-change: opacity, transform;
+}
+
+.tv-hints.tv-hints-on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: opacity 0.22s ease, transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), visibility 0s;
+}
+
+.tv-hints .tv-hint {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.18s ease, transform 0.2s ease;
+}
+
+.tv-hints.tv-hints-on .tv-hint {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.3s ease, transform 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+  transition-delay: calc(var(--i, 0) * 40ms + 60ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tv-hints,
+  .tv-hints.tv-hints-on,
+  .tv-hints .tv-hint,
+  .tv-hints.tv-hints-on .tv-hint {
+    transition-duration: 0.01s;
+    transition-delay: 0s;
+    transform: none;
+  }
+}
+
+/* TV-Modus: Hinweis unten in der Seitenleiste, wie man die Tastenhinweise einblendet */
+.tv-side-key {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 3px 9px;
+  border-radius: 7px;
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-card);
+  flex-shrink: 0;
 }
