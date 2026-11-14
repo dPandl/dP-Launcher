@@ -36,8 +36,8 @@ const buildAccountSkin = (acc, info = null) => {
     description: acc.type === 'microsoft' ? 'Dein derzeit aktiver Mojang-Skin' : 'Dein derzeit aktiver Spieler-Skin',
     playerName: acc.name,
     uuid: acc.uuid,
-    textureUrl: `https://crafthead.net/skin/${identifier}`,
-    helmUrl: `https://crafthead.net/helm/${identifier}`,
+    textureUrl: info?.texture || `https://crafthead.net/skin/${identifier}`,
+    helmUrl: info?.head || acc.skinUrl || `https://crafthead.net/helm/${identifier}`,
     variant: info?.variant || acc.skinVariant || 'classic',
     isCurrent: true
   };
@@ -103,7 +103,7 @@ export default function ProfileView({ account, onAccountChange, isAdmin = false 
       let info = null;
       const res = await window.electronAPI?.getCurrentSkin?.();
       if (res?.success) {
-        info = { variant: res.variant };
+        info = { variant: res.variant, texture: res.texture || null, head: res.head || null };
       } else {
         const detected = await detectSkinVariant(`https://crafthead.net/skin/${account.uuid || account.name}`);
         if (detected) info = { variant: detected };

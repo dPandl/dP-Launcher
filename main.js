@@ -703,6 +703,12 @@ app.on('open-file', (event, filePath) => {
   if (filePath.toLowerCase().endsWith(`.${SERVER_FILE_EXTENSION}`)) handleOpenedServerFile(filePath);
 });
 
+// Steam Deck: Unter Wayland/Gamescope kommen Zeichen der Steam-Tastatur doppelt an (dirt -> ddiirrtt).
+// X11 (XWayland) vermeidet das doppelte Texteingabe-Protokoll.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('ozone-platform', 'x11');
+}
+
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return;
   migrateLegacySetup();
@@ -857,6 +863,31 @@ ipcMain.handle('get-account', async () => {
   return settings.account || null;
 });
 
+// Kopf (Gesicht plus Hut-Ebene) aus einer Skin-PNG als kleine PNG-Data-URL, oder null
+function skinHeadDataUrl(buffer) {
+  try {
+    if (!buffer) return null;
+    const img = nativeImage.createFromBuffer(buffer);
+    const { width } = img.getSize();
+    if (!width || width < 64) return null;
+    const s = width / 64;
+    const face = img.crop({ x: 8 * s, y: 8 * s, width: 8 * s, height: 8 * s }).toBitmap();
+    const hat = img.crop({ x: 40 * s, y: 8 * s, width: 8 * s, height: 8 * s }).toBitmap();
+    const size = 8 * s;
+    const out = Buffer.from(face);
+    for (let i = 0; i < out.length; i += 4) {
+      const a = hat[i + 3] / 255;
+      if (a > 0) {
+        for (let c = 0; c < 3; c++) out[i + c] = Math.round(hat[i + c] * a + face[i + c] * (1 - a));
+      }
+      out[i + 3] = 255;
+    }
+    return nativeImage.createFromBitmap(out, { width: size, height: size }).toDataURL();
+  } catch {
+    return null;
+  }
+}
+
 ipcMain.handle('change-minecraft-skin', async (event, { variant = 'classic', skinUrl, filePath, skinName, dataUrl }) => {
   try {
     const settings = getSettings();
@@ -919,10 +950,18 @@ ipcMain.handle('change-minecraft-skin', async (event, { variant = 'classic', ski
       }
     }
 
-    // Account-Einstellungen aktualisieren
+    // Account-Einstellungen aktualisieren. Der Kopf kommt direkt aus dem neuen Skin,
+    // weil crafthead den alten Skin noch einige Minuten zwischenspeichert.
+    let skinBuffer = null;
+    try {
+      if (filePath && fs.existsSync(filePath)) skinBuffer = fs.readFileSync(filePath);
+      else if (/^data:image\/png;base64,/.test(String(dataUrl || ''))) skinBuffer = Buffer.from(String(dataUrl).replace(/^data:image\/png;base64,/, ''), 'base64');
+      else if (skinUrl) skinBuffer = Buffer.from(await (await fetch(skinUrl)).arrayBuffer());
+    } catch { /* Fallback auf crafthead */ }
     const updatedAccount = {
       ...account,
-      skinUrl: `https://crafthead.net/helm/${account.uuid || account.name}?t=${Date.now()}`
+      skinUrl: skinHeadDataUrl(skinBuffer) || `https://crafthead.net/helm/${account.uuid || account.name}?t=${Date.now()}`,
+      skinVariant: variant
     };
 
     // In Skin-Historie speichern
@@ -991,7 +1030,19 @@ ipcMain.handle('get-current-skin', async () => {
   const cached = currentSkinCache.get(account.uuid);
   if (cached && Date.now() - cached.at < 60000) return cached.value;
   const value = await fetchCurrentSkin(account);
-  if (value.success) currentSkinCache.set(account.uuid, { at: Date.now(), value });
+  if (value.success) {
+    // Skin direkt von Mojang laden (die URL ändert sich mit jedem neuen Skin, kein veralteter Zwischenspeicher)
+    try {
+      if (value.url) {
+        const buffer = Buffer.from(await (await fetch(value.url, { signal: AbortSignal.timeout(10000) })).arrayBuffer());
+        value.head = skinHeadDataUrl(buffer);
+        value.texture = buffer.length < 200000 ? `data:image/png;base64,${buffer.toString('base64')}` : null;
+      }
+    } catch (err) {
+      console.warn('Skin-Textur nicht ladbar:', err.message);
+    }
+    currentSkinCache.set(account.uuid, { at: Date.now(), value });
+  }
   return value;
 });
 

@@ -1,5 +1,20 @@
 export const releaseNotes = [
   {
+    version: '0.1.10',
+    date: '14.11.2026',
+    title: 'Updates automatisch finden, Skin-Anzeige und Steam Deck',
+    whatsNew: [
+      'Der Launcher sucht alle paar Minuten nach Updates, nicht nur beim Start',
+      'Im Changelog gibt es den Knopf „Nach Updates suchen“ mit Statusanzeige'
+    ],
+    bugFixes: [
+      'Nach einem Skin-Wechsel zeigen die Seitenleiste und das Profil sofort den neuen Skin und holen ihn direkt von Mojang',
+      'Auf dem Steam Deck werden Eingaben über die Steam-Tastatur nicht mehr doppelt geschrieben',
+      'Die Erfolgs- und Fehlermeldungen im Mod-Store sind im Dark Mode wieder lesbar und nicht mehr zu hell'
+    ],
+    adjustments: []
+  },
+  {
     version: '0.1.9',
     date: '14.11.2026',
     title: 'Starteinstellungen für RAM und Fenster, bessere Anleitungen',

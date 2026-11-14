@@ -27,6 +27,7 @@ import GlobalBackButton from './components/common/GlobalBackButton';
 import ServerImportModal from './components/ServerImportModal';
 
 const CURRENT_VERSION = releaseNotes[0]?.version || '0.1.0';
+const UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const MANIFEST_POLL_INTERVAL_MS = 5 * 60 * 1000;
 
 export default function App() {
@@ -76,6 +77,8 @@ export default function App() {
   const [activeSeason, setActiveSeason] = useState(getActiveSeasonConfig(initialSeason));
   const [updateInfo, setUpdateInfo] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [updateCheck, setUpdateCheck] = useState({ status: 'idle', checkedAt: null });
+  const dismissedUpdateRef = useRef(null);
   const [account, setAccount] = useState(null);
   const [contentScrolled, setContentScrolled] = useState(false);
   const contentAreaRef = useRef(null);
@@ -267,6 +270,48 @@ export default function App() {
     });
   }, []);
 
+  // Update-Prüfung: beim Start, danach alle paar Minuten und auf Knopfdruck im Changelog
+  const checkForUpdates = async ({ manual = false } = {}) => {
+    if (!window.electronAPI?.checkForUpdate) return;
+    if (manual) setUpdateCheck(prev => ({ ...prev, status: 'checking' }));
+    try {
+      const result = await window.electronAPI.checkForUpdate(CURRENT_VERSION);
+      if (!result || !result.latestVersion) {
+        if (manual) setUpdateCheck({ status: 'error', checkedAt: Date.now() });
+        return;
+      }
+      setUpdateCheck({ status: result.hasUpdate ? 'available' : 'current', checkedAt: Date.now() });
+      if (result.hasUpdate) {
+        setUpdateInfo(result);
+        // Automatisch nur einmal pro Version öffnen, wer es schließt wird nicht alle paar Minuten gestört
+        if (manual || dismissedUpdateRef.current !== result.latestVersion) setShowUpdateModal(true);
+      }
+    } catch (err) {
+      console.warn('Update-Prüfung fehlgeschlagen:', err);
+      if (manual) setUpdateCheck({ status: 'error', checkedAt: Date.now() });
+    }
+  };
+  const checkForUpdatesRef = useRef(checkForUpdates);
+  checkForUpdatesRef.current = checkForUpdates;
+
+  useEffect(() => {
+    if (!window.electronAPI) return undefined;
+    checkForUpdatesRef.current();
+    const timer = setInterval(() => checkForUpdatesRef.current(), UPDATE_CHECK_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Kopf in der Seitenleiste immer aus dem Skin, den Mojang gerade hat (auch wenn er woanders geändert wurde)
+  useEffect(() => {
+    if (!account?.uuid || account.type !== 'microsoft') return undefined;
+    let cancelled = false;
+    window.electronAPI?.getCurrentSkin?.().then(res => {
+      if (cancelled || !res?.success || !res.head) return;
+      setAccount(prev => (prev && prev.uuid === account.uuid && prev.skinUrl !== res.head ? { ...prev, skinUrl: res.head } : prev));
+    });
+    return () => { cancelled = true; };
+  }, [account?.uuid, account?.type]);
+
   // Initialisierung beim Start
   useEffect(() => {
     // 1. Einstellungen & Account laden
@@ -288,15 +333,6 @@ export default function App() {
         }
       });
 
-      // 2. Auto-Update Prüfung (wie in Griddly CSV)
-      window.electronAPI.checkForUpdate(CURRENT_VERSION)
-        .then(result => {
-          if (result && result.hasUpdate) {
-            setUpdateInfo(result);
-            setShowUpdateModal(true);
-          }
-        })
-        .catch(err => console.warn('Update-Prüfung fehlgeschlagen:', err));
     } else {
       // Browser Dev-Modus
       const seasonConfig = applySeasonTheme('default', 'system');
@@ -461,7 +497,13 @@ export default function App() {
               )}
 
               {currentTab === 'changelog' && (
-                <ChangelogModal />
+                <ChangelogModal
+                  currentVersion={CURRENT_VERSION}
+                  updateCheck={updateCheck}
+                  updateInfo={updateInfo}
+                  onCheckUpdate={() => checkForUpdates({ manual: true })}
+                  onShowUpdate={() => setShowUpdateModal(true)}
+                />
               )}
             </div>
           </main>
@@ -487,7 +529,10 @@ export default function App() {
       {showUpdateModal && updateInfo && (
         <UpdateModal
           updateInfo={updateInfo}
-          onClose={() => setShowUpdateModal(false)}
+          onClose={() => {
+            dismissedUpdateRef.current = updateInfo.latestVersion;
+            setShowUpdateModal(false);
+          }}
         />
       )}
     </div>

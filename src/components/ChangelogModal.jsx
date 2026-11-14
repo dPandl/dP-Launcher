@@ -1,18 +1,57 @@
 import React from 'react';
 import { releaseNotes } from '../releaseNotes';
-import { Sparkles, Bug, Wrench } from 'lucide-react';
+import { Sparkles, Bug, Wrench, RefreshCw, Download, CheckCircle2, AlertCircle } from 'lucide-react';
+
+const formatTime = (timestamp) => new Date(timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+
+// Status der Update-Prüfung als kurzer Text neben dem Knopf
+function updateStatusLine({ status, checkedAt }, updateInfo, currentVersion) {
+  if (status === 'checking') return { icon: null, text: 'Suche nach Updates…', color: 'var(--text-muted)' };
+  if (status === 'available' && updateInfo) return { icon: Download, text: `Version ${updateInfo.latestVersion} ist verfügbar`, color: 'var(--color-primary)' };
+  if (status === 'current') return { icon: CheckCircle2, text: `Du hast die neueste Version (v${currentVersion}), geprüft um ${formatTime(checkedAt)}`, color: 'var(--color-success, #10b981)' };
+  if (status === 'error') return { icon: AlertCircle, text: 'Die Suche nach Updates hat nicht geklappt. Bist du online?', color: 'var(--color-danger, #ef4444)' };
+  return null;
+}
 
 // Reiter Changelog: nur die Neuerungen des Launchers. Die Changelogs der Server stehen im Reiter Server.
-export default function ChangelogModal() {
+export default function ChangelogModal({ currentVersion, updateCheck = { status: 'idle' }, updateInfo, onCheckUpdate, onShowUpdate }) {
+  const statusLine = updateStatusLine(updateCheck, updateInfo, currentVersion);
+  const StatusIcon = statusLine?.icon;
+  const checking = updateCheck.status === 'checking';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      <div>
-        <h1 className="app-page-title" style={{ margin: 0 }}>
-          Changelog
-        </h1>
-        <p className="app-page-subtitle" style={{ margin: '4px 0 0 0' }}>
-          Alle Neuerungen des Launchers. Die Changelogs deiner Server findest du im Reiter Server.
-        </p>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+        <div>
+          <h1 className="app-page-title" style={{ margin: 0 }}>
+            Changelog
+          </h1>
+          <p className="app-page-subtitle" style={{ margin: '4px 0 0 0' }}>
+            Alle Neuerungen des Launchers. Die Changelogs deiner Server findest du im Reiter Server.
+          </p>
+        </div>
+        {onCheckUpdate && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={updateCheck.status === 'available' && updateInfo ? onShowUpdate : onCheckUpdate}
+              disabled={checking}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+            >
+              {updateCheck.status === 'available' && updateInfo
+                ? <Download size={16} />
+                : <RefreshCw size={16} className={checking ? 'spin' : undefined} />}
+              {updateCheck.status === 'available' && updateInfo ? 'Update installieren' : 'Nach Updates suchen'}
+            </button>
+            {statusLine && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: 600, color: statusLine.color }}>
+                {StatusIcon && <StatusIcon size={14} />}
+                {statusLine.text}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

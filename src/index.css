@@ -2463,10 +2463,23 @@ textarea:focus,
   color: #991b1b;
 }
 
+[data-theme="dark"] .mr-notice-success {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+[data-theme="dark"] .mr-notice-error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
 .mr-notice-line {
   margin-top: 4px;
   font-size: 13px;
-  color: var(--text-main);
+  color: inherit;
+  opacity: 0.85;
   overflow-wrap: anywhere;
 }
 
