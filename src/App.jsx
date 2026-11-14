@@ -26,6 +26,7 @@ import InstancesView from './components/InstancesView';
 import GlobalBackButton from './components/common/GlobalBackButton';
 import TvHints from './components/common/TvHints';
 import TvCursor from './components/common/TvCursor';
+import SteamModal from './components/common/SteamModal';
 import TvKeyboard from './components/common/TvKeyboard';
 import { startTvNavigation, startTvToggleWatcher, setTvZoom } from './utils/tvNavigation';
 import ServerImportModal from './components/ServerImportModal';
@@ -81,6 +82,7 @@ export default function App() {
   const [activeSeason, setActiveSeason] = useState(getActiveSeasonConfig(initialSeason));
   const [updateInfo, setUpdateInfo] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showSteamModal, setShowSteamModal] = useState(false);
   const [updateCheck, setUpdateCheck] = useState({ status: 'idle', checkedAt: null });
   const dismissedUpdateRef = useRef(null);
   const [account, setAccount] = useState(null);
@@ -133,6 +135,22 @@ export default function App() {
     }
     setManifestReady(true);
     return latest;
+  };
+
+  // Auf dem Steam Deck einmalig fragen, ob der Launcher zu Steam hinzugefügt werden soll
+  const steamAskedRef = useRef(false);
+  useEffect(() => {
+    if (steamAskedRef.current || !window.electronAPI?.getSteamInfo || settings.steamPromptShown === undefined) return;
+    steamAskedRef.current = true;
+    if (settings.steamPromptShown) return;
+    window.electronAPI.getSteamInfo().then(info => {
+      if (info?.isDeck && info.steamFound && !info.added) setShowSteamModal(true);
+    }).catch(() => {});
+  }, [settings.steamPromptShown]);
+
+  const closeSteamModal = () => {
+    setShowSteamModal(false);
+    updateSettings({ steamPromptShown: true });
   };
 
   const updateSettings = async (patch) => {
@@ -567,6 +585,8 @@ export default function App() {
           }}
         />
       )}
+
+      {showSteamModal && <SteamModal onClose={closeSteamModal} />}
 
       {/* Auto-Update Modal */}
       {showUpdateModal && updateInfo && (

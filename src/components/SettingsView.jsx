@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Save, Palette, Cpu, Link, Search, Check, MonitorCog, Moon, Sun, Monitor, Zap, Minimize2, EyeOff, LayoutTemplate,
-  ServerCog, Server, Sparkles, Pipette, Calendar, Flower2, Leaf, CloudSnow, X
+  ServerCog, Server, Sparkles, Pipette, Calendar, Flower2, Leaf, CloudSnow, X, Gamepad2
 } from 'lucide-react';
 import { SEASONS, applySeasonTheme } from '../services/seasonManager';
 import ThemeStudio from './common/ThemeStudio';
@@ -10,6 +10,7 @@ import Fab from './common/Fab';
 import WindowFields from './common/WindowFields';
 import useSystemMemory from './common/useSystemMemory';
 import RamSlider from './common/RamSlider';
+import { addLauncherToSteam } from './common/SteamModal';
 
 const THEME_ICONS = {
   default: Sparkles,
@@ -26,6 +27,16 @@ export default function SettingsView({ settings, setSettings, onReloadManifest }
   const memory = useSystemMemory();
   const [saved, setSaved] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
+  const [steamInfo, setSteamInfo] = useState(null);
+  const [steamBusy, setSteamBusy] = useState(false);
+  const loadSteamInfo = () => window.electronAPI?.getSteamInfo?.().then(setSteamInfo).catch(() => {});
+  useEffect(() => { loadSteamInfo(); }, []);
+  const handleAddToSteam = async () => {
+    setSteamBusy(true);
+    await addLauncherToSteam();
+    await loadSteamInfo();
+    setSteamBusy(false);
+  };
 
   // Automatisch speichern, sobald die Einstellungsseite verlassen wird (nur bei Änderungen)
   const latestFormRef = useRef(formData);
@@ -743,6 +754,30 @@ export default function SettingsView({ settings, setSettings, onReloadManifest }
           })}
         </div>
       </div>
+
+      {/* Steam */}
+      {steamInfo?.supported && (
+        <div className="glass-card">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Gamepad2 size={20} style={{ color: 'var(--color-primary)' }} />
+              <div>
+                <h2 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-main)', margin: 0 }}>Steam</h2>
+                <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '2px 0 0 0', lineHeight: 1.45 }}>
+                  {!steamInfo.steamFound
+                    ? 'Steam wurde nicht gefunden. Starte Steam einmal und melde dich an.'
+                    : steamInfo.added
+                      ? 'Der Launcher ist in Steam eingetragen. Ein erneutes Hinzufügen aktualisiert Eintrag und Bilder.'
+                      : 'Als Nicht-Steam-Spiel mit Poster, Grid, Banner, Icon und Logo eintragen. Danach Steam neu starten.'}
+                </p>
+              </div>
+            </div>
+            <button className="btn-secondary" onClick={handleAddToSteam} disabled={steamBusy || !steamInfo.steamFound}>
+              {steamBusy ? 'Wird hinzugefügt …' : steamInfo.added ? 'Erneut hinzufügen' : 'Zu Steam hinzufügen'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Server-Administration & BisectHosting */}
       <div className="glass-card">

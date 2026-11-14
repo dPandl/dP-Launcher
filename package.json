@@ -46,6 +46,7 @@
       "clientDefaults.js",
       "serverStore.js",
       "instanceStore.js",
+      "steamIntegration.js",
       "preload.js",
       "package.json"
     ],

@@ -1,5 +1,16 @@
 export const releaseNotes = [
   {
+    version: '0.1.13',
+    date: '15.11.2026',
+    title: 'Zu Steam hinzufügen: Launcher als Nicht-Steam-Spiel mit Bildern',
+    whatsNew: [
+      'Auf dem Steam Deck fragt der Launcher beim ersten Start, ob er zu Steam hinzugefügt werden soll, mit Poster, Grid, Banner, Icon und Logo',
+      'In den Einstellungen gibt es dafür den neuen Abschnitt „Steam“, unter Windows und Linux. Danach Steam einmal neu starten'
+    ],
+    bugFixes: [],
+    adjustments: []
+  },
+  {
     version: '0.1.12',
     date: '15.11.2026',
     title: 'TV-Modus: der ganze Launcher mit Controller und Steam Deck bedienbar',

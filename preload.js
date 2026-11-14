@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteCustomSkin: (id) => ipcRenderer.invoke('custom-skin-delete', id),
   deleteSkinHistoryItem: (id) => ipcRenderer.invoke('delete-skin-history-item', id),
 
+  // Steam
+  getSteamInfo: () => ipcRenderer.invoke('steam-info'),
+  addToSteam: () => ipcRenderer.invoke('steam-add'),
+
   // Window Controls
   setZoomFactor: (factor) => ipcRenderer.invoke('set-zoom-factor', factor),
   setFullscreen: (enabled) => ipcRenderer.invoke('set-fullscreen', enabled),

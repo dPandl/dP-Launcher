@@ -13,6 +13,7 @@ import { Auth } from 'msmc';
 import pkgMCLC from 'minecraft-launcher-core';
 const { Client: MCLCClient } = pkgMCLC;
 import net from 'net';
+import { getSteamInfo, addToSteam } from './steamIntegration.js';
 import dns from 'dns';
 import { unzipSync, strFromU8 } from 'fflate';
 import {
@@ -1672,6 +1673,15 @@ ipcMain.handle('get-system-memory', () => ({
   totalGb: Math.round((os.totalmem() / (1024 ** 3)) * 10) / 10,
   maxGb: maxAllocatableRamGb(os.totalmem())
 }));
+
+ipcMain.handle('steam-info', () => getSteamInfo().catch(() => ({ supported: false, isDeck: false, steamFound: false, added: false })));
+ipcMain.handle('steam-add', async () => {
+  try {
+    return await addToSteam(path.join(__dirname, 'public', 'app-icon.png'));
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
 
 ipcMain.handle('get-settings', () => toRendererSettings(getSettings()));
 
