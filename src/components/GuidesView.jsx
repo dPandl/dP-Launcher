@@ -4,9 +4,12 @@ import {
   BookOpen, Search, Plus, Trash2, Edit3, Eye, Upload, Save,
   CheckCircle2, AlertCircle, ChevronRight, Image as ImageIcon,
   ExternalLink, Sparkles, HelpCircle, Layers, ArrowLeft, X,
-  Share2, RefreshCw, Check, AlertTriangle
+  Share2, RefreshCw, Check, AlertTriangle, Download, ArrowUpDown, ChevronUp, ChevronDown
 } from 'lucide-react';
 import { ModrinthService } from '../services/modrinthService';
+import Dropdown from './common/Dropdown';
+import { appAlert } from '../utils/appDialog';
+import { getActiveServer, getServers } from '../utils/serverAddress';
 
 const KNOWN_ICON_MAP = {
   'splinecart': 'https://cdn.modrinth.com/data/8k5WFoGm/3b2d8e3bf6bef7c2f42d34324e61f9469e2065af_96.webp',
@@ -31,170 +34,35 @@ const KNOWN_ICON_MAP = {
   'yl57xq9u': 'https://cdn.modrinth.com/data/YL57xq9U/6e339178ad0fb1be7b11d8825f385c7075c0ee81_96.webp'
 };
 
-const STARTER_GUIDES = [
-  {
-    id: 'splinecart',
-    modSlug: 'pw_splinecart',
-    title: 'Splinecart (Achterbahnen & Fahrgeschäfte)',
-    iconUrl: KNOWN_ICON_MAP['pw_splinecart'],
-    summary: 'Erschaffe spektakuläre Achterbahnen, Loopings und Fahrgeschäfte mit stufenlosen Kurven und physikalischen Neigungen.',
-    chapters: [
-      {
-        id: 'spline-1',
-        title: '1. Schnellstart & Gleise verlegen',
-        content: `## Willkommen bei Splinecart!
 
-Mit **Splinecart** kannst du auf unserem Server echte, geschmeidige Achterbahnen und Hochgeschwindigkeitsstrecken bauen – ganz ohne abgehackte Vanilla-Gleise!
+// Sortierung bleibt zwischen Besuchen erhalten (Liste und Auswahl-Fenster teilen sie)
+const MOD_SORT_VALUES = ['name-asc', 'name-desc', 'date-desc', 'date-asc'];
+const LIST_SORT_VALUES = [...MOD_SORT_VALUES, 'updated-desc'];
 
-### Erste Schritte:
-1. **Gleisanker platzieren:** Setze einen Gleisanker (*Track Anchor*) an den Startpunkt deiner geplanten Strecke.
-2. **Gleisbauer-Werkzeug nutzen:** Klicke mit der rechten Maustaste auf den Startanker und gehe zum nächsten Punkt.
-3. **Streckenverlauf bestimmen:** Klicke erneut, um den nächsten Anker zu verbinden. Das Gleis biegt sich automatisch in einer sanften Bézier-Kurve.
+function usePersistedSort(storageKey, allowed) {
+  const [sortBy, setSortByState] = useState(() => {
+    try {
+      const stored = localStorage.getItem(storageKey);
+      return allowed.includes(stored) ? stored : 'name-asc';
+    } catch (_) {
+      return 'name-asc';
+    }
+  });
+  const setSortBy = (value) => {
+    setSortByState(value);
+    try { localStorage.setItem(storageKey, value); } catch (_) {}
+  };
+  return [sortBy, setSortBy];
+}
 
-### Steilkurven & Neigung (Banking):
-- Halte die **Shift-Taste** gedrückt, während du die Neigung des Gleises justierst.
-- In schnellen Kurven sorgt ein Schräglagen-Winkel von **20° bis 45°** dafür, dass die Lore physikalisch stabil bleibt und nicht entgleist!`,
-        images: []
-      },
-      {
-        id: 'spline-2',
-        title: '2. Antriebe, Bremsen & Stationen',
-        content: `### Geschwindigkeit kontrollieren
-
-Eine Achterbahn lebt vom Wechselspiel aus Geschwindigkeit und Nervenkitzel. Splinecart bietet dafür spezialisierte Gleistypen:
-
-- **Kettenlift (Chain Lift):** Zieht die Lore mit konstanter Geschwindigkeit steile Anstiege hinauf. Perfekt für den ersten Lifthill!
-- **Booster-Gleis (Powered Track):** Beschleunigt die Lore blitzschnell vor Steilkurven oder Loopings.
-- **Bremsschiene (Brake Track):** Reduziert sanft die Geschwindigkeit vor scharfen Kurven oder im Einfahrtsbereich des Bahnhofs.
-- **Stationsgleis:** Hält die Lore automatisch an. Durch ein **Redstone-Signal** (z. B. Knopf oder Hebel) oder wenn ein Spieler einsteigt, startet die Fahrt.`,
-        images: []
-      },
-      {
-        id: 'spline-3',
-        title: '3. Loopings, Korkenzieher & Tuning',
-        content: `### Meisterklasse: Loopings & Inversionen
-
-Du möchtest Fahrgäste kopfüber schicken? Kein Problem!
-
-1. Setze Ankerpunkte in einer vertikalen Schleife nach oben.
-2. Achte darauf, dass vor dem Looping ausreichend **Schwung** vorhanden ist (z. B. durch einen Drop oder Booster-Gleise).
-3. Verwende Korkenzieher-Kurven (Roll-Winkel bis 180°), um nahtlose Übergänge zwischen Loopings und Steilstrecken zu erzeugen.
-
-> **Sicherheits-Tipp:** Teste deine Strecke immer erst mit einer leeren Lore, bevor du Passagiere einsteigen lässt!`,
-        images: []
-      }
-    ]
-  },
-  {
-    id: 'saros-money',
-    modSlug: 'saros-money',
-    title: "Saro's Money (Wirtschaft & Münzen)",
-    iconUrl: KNOWN_ICON_MAP['saros-money'],
-    summary: 'Das Währungssystem auf unserem Server: Verdiene Münzen, eröffne Shops und handle mit anderen Spielern.',
-    chapters: [
-      {
-        id: 'money-1',
-        title: '1. Münzstufen & Währung',
-        content: `## Unser Wirtschaftssystem
-
-Auf unserem Server nutzen wir physische Münzen als stabiles Zahlungsmittel:
-
-- **Kupfermünze:** Die kleinste Einheit für den täglichen Bedarf.
-- **Silbermünze:** Wert = 10 Kupfermünzen.
-- **Goldmünze:** Wert = 10 Silbermünzen (= 100 Kupfermünzen).
-- **Platinmünze:** Wert = 10 Goldmünzen (= 1.000 Kupfermünzen) für Großprojekte und seltene Güter.
-
-### Münzen wechseln:
-Du kannst Münzen in der Werkbank (Crafting Table) jederzeit in höhere oder niedrigere Einheiten umwandeln (z. B. 10 Kupfer = 1 Silber und umgekehrt).`,
-        images: []
-      },
-      {
-        id: 'money-2',
-        title: '2. Geld verdienen & Handeln',
-        content: `### Wie komme ich an Geld?
-
-1. **Quests & Kopfgelder:** Erfülle Aufgaben an Schwarzen Brettern in Dörfern.
-2. **Rohstoff-Verkauf:** Verkaufe überschüssige Erze, Holz oder Nahrung an andere Spieler.
-3. **Eigene Shops eröffnen:** Baue eine Verkaufs-Kiste auf dem Marktplatz und biete Waren automatisch an.
-4. **Dienstleistungen:** Lass dich für Bauarbeiten, Transporte oder Streckennetze bezahlen.`,
-        images: []
-      },
-      {
-        id: 'money-3',
-        title: '3. Tresore & Sicherheit',
-        content: `### Schütze dein Vermögen!
-
-- Bewahre deine wertvollen Münzen in einem **gesperrten Tresor** oder deiner Ender-Kiste auf.
-- Verliere deine Geldbörse nicht im Kampf – halte immer nur das Geld bei dir, das du für den Einkauf benötigst!`,
-        images: []
-      }
-    ]
-  },
-  {
-    id: 'reliable-gliders',
-    modSlug: 'reliable-gliders',
-    title: 'Reliable Gliders (Gleitschirme)',
-    iconUrl: KNOWN_ICON_MAP['reliable-gliders'],
-    summary: 'Gleite sicher von Bergen, nutze thermische Aufwinde und reise schnell über die Welt.',
-    chapters: [
-      {
-        id: 'glider-1',
-        title: '1. Gleiter craften & Ausrüsten',
-        content: `## Sanftes Gleiten statt Fallschaden!
-
-Der Gleitschirm (*Glider*) ist dein treuer Begleiter zur Erkundung hoher Berge und weiter Landschaften.
-
-### Herstellung:
-- **Holz-Gleiter:** Der Einstieg. Benötigt Leder, Stöcke und Stoff/Wolle.
-- **Verstärkter Gleiter:** Hält deutlich länger und bietet bessere Flugeigenschaften.
-
-### Ausrüsten:
-Platziere den Gleiter in deinem Brustpanzer-Slot oder im Curios/Trinkets-Slot. Alternativ reicht es, ihn in der Hand zu halten und in der Luft Rechtsklick zu drücken.`,
-        images: []
-      },
-      {
-        id: 'glider-2',
-        title: '2. Flugtechnik & Thermik',
-        content: `### Steuerung in der Luft:
-- **Blick nach unten:** Schneller Flug, steilerer Sinkflug.
-- **Blick zum Horizont:** Maximaler Gleitwinkel, weite Distanz.
-- **Lagerfeuer & Lava-Aufwinde:** Wenn du über einem **Lagerfeuer (Campfire)** oder einem Lava-See fliegst, erzeugt die heiße Luft thermischen Auftrieb und trägt dich wieder nach oben!`,
-        images: []
-      }
-    ]
-  },
-  {
-    id: 'gravestones',
-    modSlug: 'pneumono_gravestones',
-    title: 'Gravestones (Grabsteine)',
-    iconUrl: KNOWN_ICON_MAP['pneumono_gravestones'],
-    summary: 'Kein Item-Verlust beim Tod: Deine Ausrüstung wird sicher in einem Grabstein verwahrt.',
-    chapters: [
-      {
-        id: 'grave-1',
-        title: '1. Automatisches Sichern beim Tod',
-        content: `## Keine Panik bei Missgeschicken!
-
-Wenn du auf unserem Server das Zeitliche segnest, verschwinden deine Items nicht im Nirgendwo und despawnen auch nicht nach 5 Minuten:
-
-1. An deinem Todesort entsteht sofort ein **Grabstein**.
-2. Alle getragenen Rüstungen, Werkzeuge und dein gesamtes Inventar werden sicher darin verstaut.
-3. Im Chat erhältst du die genauen **Koordinaten** und die Dimension deines Grabes.`,
-        images: []
-      },
-      {
-        id: 'grave-2',
-        title: '2. Grab bergen & Ausrüsten',
-        content: `### Items wiederholen:
-- Gehe zum Todespunkt zurück.
-- Klicke mit der rechten Maustaste (oder sneak-klicke) auf den Grabstein.
-- Deine Rüstung wird sofort wieder angezogen und die Items wandern in genau die gleichen Inventar-Slots zurück wie vor deinem Ableben!
-- Der Grabstein verschwindet danach automatisch.`,
-        images: []
-      }
-    ]
+function loadSeenMap(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
   }
-];
+}
 
 function resolveGuideIcon(guide, availableMods = [], modMetaMap = {}) {
   if (!guide) return '';
@@ -444,16 +312,24 @@ function renderMarkdownContent(text, onImageClick) {
   return elements;
 }
 
-export default function GuidesView({ isAdmin = false, manifest = null }) {
-  const [guides, setGuides] = useState(STARTER_GUIDES);
+export default function GuidesView({ isAdmin = false, manifest = null, settings = null }) {
+  const servers = getServers(settings);
+  const activeServer = getActiveServer(settings);
+  const handleSelectServer = async (id) => {
+    if (!window.electronAPI || !id || id === activeServer?.id) return;
+    if (isEditing) setIsEditing(false);
+    const res = await window.electronAPI.setActiveServer(id);
+    if (!res?.success) appAlert(res?.error || 'Der Server konnte nicht gewechselt werden.', { warning: true });
+  };
+  const [guides, setGuides] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedModId, setSelectedModId] = useState(STARTER_GUIDES[0].id);
-  const [activeChapterId, setActiveChapterId] = useState(STARTER_GUIDES[0].chapters[0].id);
+  const [selectedModId, setSelectedModId] = useState(null);
+  const [activeChapterId, setActiveChapterId] = useState(null);
 
   // Navigations-Ebene in der linken Spalte: 'mods' (Mod-Übersicht) oder 'chapters' (Kapitel-Auswahl)
   const [navLevel, setNavLevel] = useState('mods');
@@ -471,6 +347,7 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
 
   // In-App Modale
   const [showNewModModal, setShowNewModModal] = useState(false);
+  const [showChapterModModal, setShowChapterModModal] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
 
   // Lokalen Entwurf laden
@@ -522,14 +399,18 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
     setLoading(true);
     try {
       if (window.electronAPI?.getGuides) {
-        const res = await window.electronAPI.getGuides();
-        if (res?.success && Array.isArray(res.guides) && res.guides.length > 0) {
+        const res = await window.electronAPI.getGuides({ remote: !isAdmin });
+        if (res?.success && Array.isArray(res.guides)) {
           const enriched = res.guides.map(g => ({
             ...g,
             iconUrl: resolveGuideIcon(g, availableMods, modMetaMap)
           }));
           setGuides(enriched);
-          if (!selectedModId || !enriched.some(g => g.id === selectedModId)) {
+          if (enriched.length === 0) {
+            setSelectedModId(null);
+            setActiveChapterId(null);
+            setNavLevel('mods');
+          } else if (!selectedModId || !enriched.some(g => g.id === selectedModId)) {
             setSelectedModId(enriched[0].id);
             setActiveChapterId(enriched[0].chapters?.[0]?.id || null);
           }
@@ -537,7 +418,7 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
         }
       }
     } catch (err) {
-      console.warn('IPC getGuides nicht erreichbar, nutze integrierte Starter-Guides:', err);
+      console.warn('IPC getGuides nicht erreichbar:', err);
     } finally {
       setLoading(false);
     }
@@ -545,21 +426,68 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
 
   useEffect(() => {
     loadGuides();
-  }, [availableMods.length, Object.keys(modMetaMap).length]);
+  }, [availableMods.length, Object.keys(modMetaMap).length, activeServer?.id]);
+
+  // Serverwechsel: Auswahl zurücksetzen, die Anleitungen gehören zum Modpack des Servers
+  useEffect(() => {
+    setGuides([]);
+    setSelectedModId(null);
+    setActiveChapterId(null);
+    setNavLevel('mods');
+    setSearchQuery('');
+  }, [activeServer?.id]);
 
   // Filterung nach Suche
+  const [listSort, setListSort] = usePersistedSort('guides-list-sort', LIST_SORT_VALUES);
+
+  // Gesehen-Stand pro Server: Anleitungs-ID -> updatedAt, das der Spieler zuletzt gesehen hat
+  const seenStorageKey = `guides-seen:${activeServer?.id || '_'}`;
+  const [seenMap, setSeenMap] = useState(() => loadSeenMap(seenStorageKey));
+  useEffect(() => {
+    setSeenMap(loadSeenMap(seenStorageKey));
+  }, [seenStorageKey]);
+
+  const markGuideSeen = (guide) => {
+    if (!guide) return;
+    const stamp = guide.updatedAt || 1;
+    setSeenMap(prev => {
+      if ((prev[guide.id] || 0) >= stamp) return prev;
+      const next = { ...prev, [guide.id]: stamp };
+      try { localStorage.setItem(seenStorageKey, JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  };
+
+  // 'new' = noch nie geöffnet, 'updated' = seit dem letzten Öffnen geändert
+  const getFreshness = (guide) => {
+    const seen = seenMap[guide.id];
+    if (seen === undefined) return 'new';
+    return (guide.updatedAt || 0) > seen ? 'updated' : null;
+  };
   const filteredGuides = useMemo(() => {
-    if (!searchQuery.trim()) return guides;
-    const q = searchQuery.toLowerCase();
-    return guides.filter(g =>
-      (g.title && g.title.toLowerCase().includes(q)) ||
-      (g.summary && g.summary.toLowerCase().includes(q)) ||
-      (g.modSlug && g.modSlug.toLowerCase().includes(q)) ||
-      (g.chapters && g.chapters.some(c =>
-        c.title.toLowerCase().includes(q) || (c.content && c.content.toLowerCase().includes(q))
-      ))
-    );
-  }, [guides, searchQuery]);
+    const q = searchQuery.trim().toLowerCase();
+    const filtered = q
+      ? guides.filter(g =>
+        (g.title && g.title.toLowerCase().includes(q)) ||
+        (g.summary && g.summary.toLowerCase().includes(q)) ||
+        (g.modSlug && g.modSlug.toLowerCase().includes(q)) ||
+        (g.chapters && g.chapters.some(c =>
+          c.title.toLowerCase().includes(q) || (c.content && c.content.toLowerCase().includes(q)) ||
+          (c.modName && c.modName.toLowerCase().includes(q)) || (c.modSlug && c.modSlug.toLowerCase().includes(q))
+        ))
+      )
+      : guides;
+    // Neueste = zuletzt angelegt (Reihenfolge in der Datei)
+    const indexed = filtered.map(g => ({ g, i: guides.indexOf(g) }));
+    indexed.sort((a, b) => {
+      if (listSort === 'name-desc') return (b.g.title || '').localeCompare(a.g.title || '', 'de', { sensitivity: 'base' });
+      if (listSort === 'updated-desc') return ((b.g.updatedAt || 0) - (a.g.updatedAt || 0)) || (b.i - a.i);
+      if (listSort === 'date-desc') return b.i - a.i;
+      if (listSort === 'date-asc') return a.i - b.i;
+      return (a.g.title || '').localeCompare(b.g.title || '', 'de', { sensitivity: 'base' });
+    });
+    return indexed.map(x => x.g);
+  }, [guides, searchQuery, listSort]);
 
   // Aktive Mod
   const activeGuide = useMemo(() => {
@@ -598,6 +526,7 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
           if (target?.chapters?.length > 0) {
             setActiveChapterId(target.chapters[0].id);
           }
+          markGuideSeen(target);
           setNavLevel('chapters');
           setConfirmDialog(null);
         }
@@ -609,7 +538,28 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
     if (target?.chapters?.length > 0) {
       setActiveChapterId(target.chapters[0].id);
     }
+    markGuideSeen(target);
     setNavLevel('chapters');
+  };
+
+  // Zurück zur Liste: im Bearbeiten-Modus erst fragen, dann den Entwurf verwerfen
+  const handleBackToList = () => {
+    if (!isEditing) {
+      setNavLevel('mods');
+      return;
+    }
+    setConfirmDialog({
+      title: 'Ungespeicherte Änderungen',
+      message: 'Möchtest du die aktuellen Änderungen an dieser Anleitung verwerfen?',
+      confirmText: 'Änderungen verwerfen',
+      confirmDanger: true,
+      onConfirm: () => {
+        setIsEditing(false);
+        setEditedGuide(null);
+        setNavLevel('mods');
+        setConfirmDialog(null);
+      }
+    });
   };
 
   // Edit-Modus umschalten
@@ -629,7 +579,9 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
     if (!editedGuide) return;
     setSaving(true);
     try {
-      const updatedGuides = guides.map(g => (g.id === editedGuide.id ? editedGuide : g));
+      const stamped = { ...editedGuide, createdAt: editedGuide.createdAt || Date.now(), updatedAt: Date.now() };
+      const updatedGuides = guides.map(g => (g.id === stamped.id ? stamped : g));
+      markGuideSeen(stamped); // eigene Änderungen sind für den Admin nicht „neu“
       setGuides(updatedGuides);
       if (window.electronAPI?.saveGuides) {
         const res = await window.electronAPI.saveGuides(updatedGuides);
@@ -642,6 +594,53 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
       setStatusMessage({ type: 'error', text: err.message });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const showStatus = (type, text, ms = 5000) => {
+    setStatusMessage({ type, text });
+    if (type === 'success') setTimeout(() => setStatusMessage(null), ms);
+  };
+
+  // Export als JSON-Datei: ids = einzelne Anleitung, sonst alle
+  const handleExportGuides = async (ids = null) => {
+    if (!window.electronAPI?.exportGuides) {
+      showStatus('error', 'Export ist erst nach Neustart des Launchers aktiv.');
+      return;
+    }
+    const res = await window.electronAPI.exportGuides(ids);
+    if (res?.canceled) return;
+    if (res?.success) showStatus('success', `${res.count} ${res.count === 1 ? 'Anleitung' : 'Anleitungen'} exportiert.`);
+    else showStatus('error', res?.error || 'Export fehlgeschlagen.');
+  };
+
+  // Import aus JSON-Datei: gleiche ID ersetzt, neue werden hinzugefügt
+  const handleImportGuides = async () => {
+    if (!window.electronAPI?.importGuides) {
+      showStatus('error', 'Import ist erst nach Neustart des Launchers aktiv.');
+      return;
+    }
+    const res = await window.electronAPI.importGuides();
+    if (res?.canceled) return;
+    if (!res?.success) {
+      showStatus('error', res?.error || 'Import fehlgeschlagen.');
+      return;
+    }
+    const existingIds = new Set(guides.map(g => g.id));
+    const replaced = res.guides.filter(g => existingIds.has(g.id)).length;
+    const added = res.guides.length - replaced;
+    const importedById = new Map(res.guides.map(g => [g.id, g]));
+    const merged = [
+      ...guides.map(g => importedById.get(g.id) || g),
+      ...res.guides.filter(g => !existingIds.has(g.id))
+    ].map(g => ({ ...g, iconUrl: resolveGuideIcon(g, availableMods, modMetaMap) }));
+    try {
+      const saved = await window.electronAPI.saveGuides(merged);
+      if (!saved?.success) throw new Error(saved?.error || 'Speichern fehlgeschlagen');
+      setGuides(merged);
+      showStatus('success', `Import fertig: ${added} neu, ${replaced} ersetzt${res.skipped ? `, ${res.skipped} übersprungen` : ''}.`);
+    } catch (err) {
+      showStatus('error', err.message);
     }
   };
 
@@ -702,22 +701,40 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
     }
   };
 
-  // Neues Kapitel hinzufügen
-  const handleAddChapter = () => {
-    if (!editedGuide) return;
-    const newChapterId = `chap-${Date.now()}`;
-    const newChapterNum = (editedGuide.chapters?.length || 0) + 1;
-    const newChapter = {
-      id: newChapterId,
-      title: `${newChapterNum}. Neues Kapitel`,
-      content: '## Neues Kapitel\n\nBeschreibe hier die Funktion der Mod...',
-      images: []
-    };
+  // Kapitel hinzufügen: items = [{ mod, icon }], mod ist optional.
+  // Ein Kapitel kann zu einer Mod gehören, damit allgemeine Anleitungen in der Mod-Suche auftauchen.
+  const handleAddChapters = (items) => {
+    if (!editedGuide || !items?.length) return;
+    const stamp = Date.now();
+    const newChapters = items.map(({ mod, icon }, i) => {
+      const modName = mod ? (mod.name || mod.title || mod.slug) : '';
+      return {
+        id: `chap-${stamp}-${i}`,
+        title: mod ? modName : 'Neues Kapitel',
+        content: mod
+          ? `## ${modName}\n\nBeschreibe hier, was ${modName} bewirkt und wie man es nutzt...`
+          : '## Neues Kapitel\n\nBeschreibe hier die Funktion der Mod...',
+        images: [],
+        ...(mod ? { modSlug: mod.slug || '', modName, modIconUrl: icon || mod.iconUrl || '' } : {})
+      };
+    });
     setEditedGuide(prev => ({
       ...prev,
-      chapters: [...(prev.chapters || []), newChapter]
+      chapters: [...(prev.chapters || []), ...newChapters]
     }));
-    setActiveChapterId(newChapterId);
+    setActiveChapterId(newChapters[0].id);
+  };
+
+  // Kapitel in der Reihenfolge verschieben (dir: -1 nach oben, +1 nach unten)
+  const moveChapter = (chapId, dir) => {
+    setEditedGuide(prev => {
+      const list = [...(prev.chapters || [])];
+      const i = list.findIndex(c => c.id === chapId);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= list.length) return prev;
+      [list[i], list[j]] = [list[j], list[i]];
+      return { ...prev, chapters: list };
+    });
   };
 
   // Kapitel löschen mit In-App Modal
@@ -774,40 +791,43 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
   };
 
   // Ausgewählte Mod aus dem Modal anlegen
-  const handleSelectModFromModal = (mod, resolvedIcon) => {
-    const title = mod.name || mod.title || mod.slug;
-    const slug = mod.slug || title.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-    const existing = guides.find(g => g.id === slug || g.modSlug === slug);
+  // Mehrere Mods auf einmal: pro Mod entsteht eine Anleitung, die erste wird zum Bearbeiten geöffnet
+  const handleSelectModsFromModal = (items) => {
+    if (!items?.length) return;
+    const stamp = Date.now();
+    const created = [];
+    items.forEach(({ mod, icon }, i) => {
+      const title = mod.name || mod.title || mod.slug;
+      const slug = mod.slug || title.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+      // Pro Mod sind mehrere Anleitungen möglich: die ID bekommt bei Bedarf ein Suffix
+      let uniqueId = slug;
+      for (let n = 2; guides.some(g => g.id === uniqueId) || created.some(g => g.id === uniqueId); n++) uniqueId = `${slug}-${n}`;
+      created.push({
+        id: uniqueId,
+        modSlug: slug,
+        title,
+        iconUrl: icon || mod.iconUrl || '',
+        summary: mod.summary || mod.description || `Anleitung & Dokumentation für ${title}`,
+        createdAt: stamp,
+        updatedAt: stamp,
+        chapters: [
+          {
+            id: `chap-${stamp}-${i}`,
+            title: '1. Einstieg & Grundlagen',
+            content: `## Willkommen bei ${title}!\n\nHier findest du alle wichtigen Informationen, Rezepte und Steuerungshinweise für ${title}.`,
+            images: []
+          }
+        ]
+      });
+    });
 
-    if (existing) {
-      setSelectedModId(existing.id);
-      setActiveChapterId(existing.chapters?.[0]?.id || null);
-      setNavLevel('chapters');
-      setShowNewModModal(false);
-      return;
-    }
-
-    const newGuide = {
-      id: slug,
-      modSlug: slug,
-      title: title,
-      iconUrl: resolvedIcon || mod.iconUrl || '',
-      summary: mod.summary || mod.description || `Anleitung & Dokumentation für ${title}`,
-      chapters: [
-        {
-          id: `chap-${Date.now()}`,
-          title: '1. Einstieg & Grundlagen',
-          content: `## Willkommen bei ${title}!\n\nHier findest du alle wichtigen Informationen, Rezepte und Steuerungshinweise für ${title}.`,
-          images: []
-        }
-      ]
-    };
-
-    const nextGuides = [...guides, newGuide];
+    const first = created[0];
+    const nextGuides = [...guides, ...created];
+    created.forEach(markGuideSeen);
     setGuides(nextGuides);
-    setSelectedModId(newGuide.id);
-    setActiveChapterId(newGuide.chapters[0].id);
-    setEditedGuide(newGuide);
+    setSelectedModId(first.id);
+    setActiveChapterId(first.chapters[0].id);
+    setEditedGuide(first);
     setIsEditing(true);
     setNavLevel('chapters');
     setShowNewModModal(false);
@@ -829,6 +849,21 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
           <p className="app-page-subtitle" style={{ margin: '4px 0 0 0', fontSize: '13px' }}>
             Bauanleitungen, Währungssystem, Steuerung und Tipps für unsere Server-Mods
           </p>
+        </div>
+
+        <div className="guides-header-actions">
+          {servers.length > 0 && (
+            <Dropdown
+              value={activeServer?.id || ''}
+              onChange={(e) => handleSelectServer(e.target.value)}
+              aria-label="Server auswählen"
+              style={{ minWidth: '200px', maxWidth: '280px' }}
+            >
+              {servers.map(server => (
+                <option key={server.id} value={server.id}>{server.name}</option>
+              ))}
+            </Dropdown>
+          )}
         </div>
 
         {/* Admin Actions oben rechts */}
@@ -865,14 +900,37 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
               </>
             ) : (
               <>
+                {navLevel === 'chapters' && activeGuide && (
+                  <button
+                    type="button"
+                    onClick={toggleEditMode}
+                    className="btn-secondary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Edit3 size={15} />
+                    <span>Bearbeiten</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={toggleEditMode}
+                  onClick={handleImportGuides}
                   className="btn-secondary"
                   style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  title="Anleitungen aus einer JSON-Datei importieren"
                 >
-                  <Edit3 size={15} />
-                  <span>Bearbeiten</span>
+                  <Upload size={15} />
+                  <span>Importieren</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExportGuides(null)}
+                  disabled={guides.length === 0}
+                  className="btn-secondary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  title="Alle Anleitungen als JSON-Datei exportieren"
+                >
+                  <Download size={15} />
+                  <span>Exportieren</span>
                 </button>
                 <button
                   type="button"
@@ -918,7 +976,7 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
               <button
                 type="button"
                 className="btn-guides-back"
-                onClick={() => setNavLevel('mods')}
+                onClick={handleBackToList}
               >
                 <ArrowLeft size={15} />
                 <span>Alle Mod-Anleitungen</span>
@@ -952,6 +1010,35 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
                     >
                       <span className="guide-chapter-badge">{idx + 1}</span>
                       <span className="guide-chapter-item-text">{chap.title}</span>
+                      {chap.modSlug && (
+                        <span title={chap.modName || chap.modSlug} style={{ display: 'inline-flex', flexShrink: 0 }}>
+                          <ModIcon
+                            iconUrl={resolveGuideIcon({ slug: chap.modSlug, title: chap.modName, iconUrl: chap.modIconUrl }, availableMods, modMetaMap)}
+                            title={chap.modName || chap.modSlug}
+                            size={20}
+                          />
+                        </span>
+                      )}
+                      {isEditing && (
+                        <span style={{ display: 'inline-flex', flexShrink: 0 }}>
+                          <span
+                            className="guide-chapter-item-move"
+                            style={{ opacity: idx === 0 ? 0.3 : 1 }}
+                            onClick={(e) => { e.stopPropagation(); moveChapter(chap.id, -1); }}
+                            title="Nach oben"
+                          >
+                            <ChevronUp size={13} />
+                          </span>
+                          <span
+                            className="guide-chapter-item-move"
+                            style={{ opacity: idx === (editedGuide?.chapters?.length || 0) - 1 ? 0.3 : 1 }}
+                            onClick={(e) => { e.stopPropagation(); moveChapter(chap.id, 1); }}
+                            title="Nach unten"
+                          >
+                            <ChevronDown size={13} />
+                          </span>
+                        </span>
+                      )}
                       {isEditing && (
                         <span
                           className="guide-chapter-item-delete"
@@ -969,12 +1056,24 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
                 })}
               </div>
 
+              {isAdmin && !isEditing && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => handleExportGuides([activeGuide.id])}
+                  style={{ marginTop: '12px', width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '12px' }}
+                >
+                  <Download size={14} />
+                  <span>Diese Anleitung exportieren</span>
+                </button>
+              )}
+
               {/* Admin Button: Kapitel hinzufügen */}
               {isEditing && (
                 <button
                   type="button"
                   className="btn-secondary"
-                  onClick={handleAddChapter}
+                  onClick={() => setShowChapterModModal(true)}
                   style={{ marginTop: '12px', width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '12px' }}
                 >
                   <Plus size={14} />
@@ -1005,16 +1104,33 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
                 )}
               </div>
 
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                <ArrowUpDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                <Dropdown
+                  value={listSort}
+                  onChange={(e) => setListSort(e.target.value)}
+                  aria-label="Sortierung"
+                  style={{ minWidth: '185px', height: '34px', fontSize: '12.5px' }}
+                >
+                  <option value="name-asc">Name (A → Z)</option>
+                  <option value="name-desc">Name (Z → A)</option>
+                  <option value="date-desc">Neueste zuerst</option>
+                  <option value="date-asc">Älteste zuerst</option>
+                  <option value="updated-desc">Zuletzt aktualisiert</option>
+                </Dropdown>
+              </div>
+
               <div className="guides-mod-items-list">
                 {filteredGuides.map(guide => {
                                     const chapterCount = guide.chapters?.length || 0;
                   const resolvedIcon = resolveGuideIcon(guide, availableMods, modMetaMap);
+                  const freshness = getFreshness(guide);
 
                   return (
                     <button
                       key={guide.id}
                       type="button"
-                      className="guide-overview-card"
+                      className={`guide-overview-card${freshness ? ' is-fresh' : ''}`}
                       onClick={() => handleSelectMod(guide.id)}
                     >
                       <div className="guide-overview-head">
@@ -1029,6 +1145,11 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
                         <span className="badge" style={{ padding: '3px 10px', fontSize: '12px' }}>
                           {chapterCount} {chapterCount === 1 ? 'Kapitel' : 'Kapitel'}
                         </span>
+                        {freshness && (
+                          <span className="guide-fresh-badge">
+                            {freshness === 'new' ? 'Neu' : 'Aktualisiert'}
+                          </span>
+                        )}
                       </div>
                     </button>
                   );
@@ -1036,7 +1157,9 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
 
                 {filteredGuides.length === 0 && (
                   <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                    Keine Anleitungen für "{searchQuery}" gefunden.
+                    {searchQuery.trim()
+                      ? `Keine Anleitungen für "${searchQuery}" gefunden.`
+                      : 'Für diesen Server gibt es noch keine Anleitungen.'}
                   </div>
                 )}
               </div>
@@ -1238,8 +1361,25 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
         <NewModGuideModal
           availableMods={availableMods}
           modMetaMap={modMetaMap}
-          onSelectMod={handleSelectModFromModal}
+          guides={guides}
+          onSelectMods={handleSelectModsFromModal}
           onClose={() => setShowNewModModal(false)}
+        />,
+        document.body
+      )}
+
+      {/* MODAL: Kapitel hinzufügen, optional zu einer Mod */}
+      {showChapterModModal && createPortal(
+        <NewModGuideModal
+          availableMods={availableMods}
+          modMetaMap={modMetaMap}
+          guides={isEditing && editedGuide ? guides.map(g => (g.id === editedGuide.id ? editedGuide : g)) : guides}
+          heading="Kapitel hinzufügen"
+          intro="Wähle die Mod, um die es in diesem Kapitel geht. So findet man die Anleitung auch über diese Mod. Die Zahl zeigt, wie viele Anleitungen eine Mod schon behandeln."
+          skipLabel="Kapitel ohne Mod"
+          onSkip={() => { handleAddChapters([{ mod: null, icon: '' }]); setShowChapterModModal(false); }}
+          onSelectMods={(items) => { handleAddChapters(items); setShowChapterModModal(false); }}
+          onClose={() => setShowChapterModModal(false)}
         />,
         document.body
       )}
@@ -1306,29 +1446,77 @@ export default function GuidesView({ isAdmin = false, manifest = null }) {
 }
 
 // Modal zur Mod-Auswahl mit echten Icons und Titeln
-function NewModGuideModal({ availableMods, modMetaMap, onSelectMod, onClose }) {
+// Anleitungen, die eine Mod behandeln: als Haupt-Mod der Anleitung oder in einem Kapitel
+function countGuidesForMod(guides, mod) {
+  const key = (mod.slug || '').toLowerCase();
+  if (!key) return 0;
+  return guides.filter(g =>
+    (g.modSlug || g.id || '').toLowerCase() === key ||
+    (g.chapters || []).some(c => (c.modSlug || '').toLowerCase() === key)
+  ).length;
+}
+
+// Auswahl-Fenster für Mods. Ohne onSkip legt es eine neue Mod-Anleitung an, mit onSkip ein Kapitel (Mod optional).
+function NewModGuideModal({
+  availableMods, modMetaMap, guides = [], onSelectMods, onClose,
+  heading = 'Neue Mod-Anleitung',
+  intro = 'Wähle eine Mod aus deinem Modpack aus. Name, Beschreibung und das offizielle Icon werden automatisch übernommen.',
+  onSkip = null,
+  skipLabel = 'Ohne Mod fortfahren'
+}) {
+  const countGuidesFor = (mod) => countGuidesForMod(guides, mod);
   const [filter, setFilter] = useState('');
   const [manualName, setManualName] = useState('');
   const [isManual, setIsManual] = useState(false);
 
+  const [onlyWithout, setOnlyWithout] = useState(false);
+  const [sortBy, setSortBy] = usePersistedSort('guides-mod-sort', MOD_SORT_VALUES);
+
+  // Mehrfachauswahl: Mod-Schlüssel -> { mod, icon }, in der Reihenfolge des Anklickens
+  const [selected, setSelected] = useState(() => new Map());
+  const toggleSelected = (mod, icon) => {
+    const key = mod.slug || mod.name;
+    setSelected(prev => {
+      const next = new Map(prev);
+      if (next.has(key)) next.delete(key);
+      else next.set(key, { mod, icon });
+      return next;
+    });
+  };
+
   const filteredMods = useMemo(() => {
-    if (!filter.trim()) return availableMods;
-    const q = filter.toLowerCase();
-    return availableMods.filter(m =>
-      (m.name && m.name.toLowerCase().includes(q)) ||
-      (m.slug && m.slug.toLowerCase().includes(q)) ||
-      (m.summary && m.summary.toLowerCase().includes(q))
-    );
-  }, [availableMods, filter]);
+    const q = filter.trim().toLowerCase();
+    const list = availableMods
+      .map((m, originalIndex) => ({ mod: m, originalIndex }))
+      .filter(({ mod: m }) => {
+        if (onlyWithout && countGuidesFor(m) > 0) return false;
+        if (!q) return true;
+        return (m.name && m.name.toLowerCase().includes(q)) ||
+          (m.slug && m.slug.toLowerCase().includes(q)) ||
+          (m.summary && m.summary.toLowerCase().includes(q));
+      });
+    const label = (m) => m.name || m.slug || '';
+    const time = ({ mod, originalIndex }) => mod.addedAt || originalIndex;
+    list.sort((a, b) => {
+      if (sortBy === 'name-asc') return label(a.mod).localeCompare(label(b.mod), 'de', { sensitivity: 'base' });
+      if (sortBy === 'name-desc') return label(b.mod).localeCompare(label(a.mod), 'de', { sensitivity: 'base' });
+      if (sortBy === 'date-desc') return time(b) - time(a);
+      return time(a) - time(b);
+    });
+    return list.map(x => x.mod);
+  }, [availableMods, filter, onlyWithout, sortBy, guides]);
 
   const handleCreateManual = () => {
     if (!manualName.trim()) return;
-    onSelectMod({
-      name: manualName.trim(),
-      slug: manualName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-'),
-      iconUrl: '',
-      summary: `Anleitung für ${manualName.trim()}`
-    }, '');
+    onSelectMods([{
+      mod: {
+        name: manualName.trim(),
+        slug: manualName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-'),
+        iconUrl: '',
+        summary: `Anleitung für ${manualName.trim()}`
+      },
+      icon: ''
+    }]);
   };
 
   return (
@@ -1339,7 +1527,7 @@ function NewModGuideModal({ availableMods, modMetaMap, onSelectMod, onClose }) {
             <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'var(--color-primary-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-primary)' }}>
               <BookOpen size={16} />
             </div>
-            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>Neue Mod-Anleitung</h3>
+            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>{heading}</h3>
           </div>
           <button type="button" className="mr-icon-button" onClick={onClose}>
             <X size={16} />
@@ -1347,7 +1535,7 @@ function NewModGuideModal({ availableMods, modMetaMap, onSelectMod, onClose }) {
         </div>
 
         <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: 'var(--text-muted)' }}>
-          Wähle eine Mod aus deinem Modpack aus. Name, Beschreibung und das offizielle Icon werden automatisch übernommen.
+          {intro}
         </p>
 
         {!isManual ? (
@@ -1369,15 +1557,59 @@ function NewModGuideModal({ availableMods, modMetaMap, onSelectMod, onClose }) {
               )}
             </div>
 
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+              <ArrowUpDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+              <Dropdown
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                aria-label="Sortierung"
+                style={{ minWidth: '185px', height: '34px', fontSize: '12.5px' }}
+              >
+                <option value="name-asc">Name (A → Z)</option>
+                <option value="name-desc">Name (Z → A)</option>
+                <option value="date-desc">Neueste zuerst</option>
+                <option value="date-asc">Älteste zuerst</option>
+              </Dropdown>
+              <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-well)', padding: '2px', borderRadius: '10px', border: '1px solid var(--border-card)' }}>
+                {[{ id: false, label: 'Alle' }, { id: true, label: 'Ohne Anleitung' }].map(opt => (
+                  <button
+                    key={String(opt.id)}
+                    type="button"
+                    onClick={() => setOnlyWithout(opt.id)}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '11.5px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      background: onlyWithout === opt.id ? 'var(--color-primary-soft)' : 'transparent',
+                      color: onlyWithout === opt.id ? 'var(--color-primary)' : 'var(--text-muted)'
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div style={{ flex: 1, minHeight: '220px', maxHeight: '340px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '4px' }}>
               {filteredMods.map(mod => {
                 const icon = resolveGuideIcon(mod, availableMods, modMetaMap);
+                const guideCount = countGuidesFor(mod);
+                const modKey = mod.slug || mod.name;
+                const isSelected = selected.has(modKey);
                 return (
                   <div
-                    key={mod.slug || mod.name}
-                    onClick={() => onSelectMod(mod, icon)}
+                    key={modKey}
+                    onClick={() => toggleSelected(mod, icon)}
                     className="guide-card-mod-btn"
-                    style={{ cursor: 'pointer' }}
+                    style={{
+                      cursor: 'pointer',
+                      ...(isSelected ? { borderColor: 'var(--color-primary)', background: 'var(--color-primary-soft)' } : {})
+                    }}
+                    role="checkbox"
+                    aria-checked={isSelected}
                   >
                     <ModIcon iconUrl={icon} title={mod.name || mod.slug} size={38} />
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -1388,14 +1620,34 @@ function NewModGuideModal({ availableMods, modMetaMap, onSelectMod, onClose }) {
                         {mod.summary || mod.description || mod.slug}
                       </div>
                     </div>
-                    <ChevronRight size={16} style={{ color: 'var(--text-muted)', opacity: 0.5 }} />
+                    {guideCount > 0 && (
+                      <span className="badge" style={{ padding: '2px 9px', fontSize: '11.5px', flexShrink: 0 }}>
+                        {guideCount} {guideCount === 1 ? 'Anleitung' : 'Anleitungen'}
+                      </span>
+                    )}
+                    <span
+                      style={{
+                        width: '20px',
+                        height: '20px',
+                        borderRadius: '6px',
+                        flexShrink: 0,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: `1.5px solid ${isSelected ? 'var(--color-primary)' : 'var(--border-card)'}`,
+                        background: isSelected ? 'var(--color-primary)' : 'transparent',
+                        color: '#fff'
+                      }}
+                    >
+                      {isSelected && <Check size={13} strokeWidth={3} />}
+                    </span>
                   </div>
                 );
               })}
 
               {filteredMods.length === 0 && (
                 <div style={{ padding: '30px 10px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                  Keine Mod gefunden. Du kannst auch ein eigenes Thema anlegen:
+                  {onSkip ? 'Keine Mod gefunden.' : 'Keine Mod gefunden. Du kannst auch ein eigenes Thema anlegen:'}
                 </div>
               )}
             </div>
@@ -1404,19 +1656,32 @@ function NewModGuideModal({ availableMods, modMetaMap, onSelectMod, onClose }) {
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => setIsManual(true)}
+                onClick={onSkip || (() => setIsManual(true))}
                 style={{ fontSize: '12px', padding: '6px 12px' }}
               >
-                Eigenes Thema ohne Mod anlegen
+                {onSkip ? skipLabel : 'Eigenes Thema ohne Mod anlegen'}
               </button>
-              <button
-                type="button"
-                className="modal-btn-secondary"
-                onClick={onClose}
-                style={{ flex: 'none', padding: '0 16px' }}
-              >
-                Abbrechen
-              </button>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="modal-btn-secondary"
+                  onClick={onClose}
+                  style={{ flex: 'none', padding: '0 16px' }}
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="button"
+                  className="modal-btn-primary"
+                  disabled={selected.size === 0}
+                  onClick={() => onSelectMods(Array.from(selected.values()))}
+                  style={{ flex: 'none', padding: '0 16px' }}
+                >
+                  {selected.size === 0
+                    ? 'Mods auswählen'
+                    : `${selected.size} ${selected.size === 1 ? 'Mod' : 'Mods'} hinzufügen`}
+                </button>
+              </div>
             </div>
           </>
         ) : (

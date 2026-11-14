@@ -211,6 +211,16 @@ export default function ModpackPipeline({ draft, published, settings, onPublishe
     setIsApplying(false);
     await checkBackupInfo();
     loadServerPlan();
+
+    // Die neuen Mods greifen erst nach einem Neustart: direkt danach fragen
+    if (res?.success && res.changed > 0 && serverId) {
+      const restartNow = await appConfirm('Die Test-Mods liegen jetzt auf dem Server. Möchtest du den Server jetzt neu starten, damit sie aktiv werden?', {
+        title: 'Server neu starten?',
+        confirmLabel: 'Jetzt neu starten',
+        cancelLabel: 'Später'
+      });
+      if (restartNow) await handleRestart();
+    }
   };
 
   const handleRestoreBackup = async () => {

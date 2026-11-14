@@ -4,8 +4,7 @@ import { createPortal } from 'react-dom';
 import { Globe, Plus, FileDown, FileUp, Pencil, FolderOpen, Trash2, Check, X, Share2, FileText, ChevronDown } from 'lucide-react';
 import { appAlert } from '../utils/appDialog';
 import { getServers, getActiveServer } from '../utils/serverAddress';
-import Dropdown from './common/Dropdown';
-import PlayView from './PlayView';
+import Dropdown from './common/Dropdown';import PlayView from './PlayView';
 import ServerChangelog from './ServerChangelog';
 
 const labelStyle = { display: 'block', fontSize: '12.5px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' };

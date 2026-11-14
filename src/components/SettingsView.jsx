@@ -7,6 +7,9 @@ import {
 import { SEASONS, applySeasonTheme } from '../services/seasonManager';
 import ThemeStudio from './common/ThemeStudio';
 import Fab from './common/Fab';
+import WindowFields from './common/WindowFields';
+import useSystemMemory from './common/useSystemMemory';
+import RamSlider from './common/RamSlider';
 
 const THEME_ICONS = {
   default: Sparkles,
@@ -20,6 +23,7 @@ const THEME_ICONS = {
 
 export default function SettingsView({ settings, setSettings, onReloadManifest }) {
   const [formData, setFormData] = useState({ ...settings });
+  const memory = useSystemMemory();
   const [saved, setSaved] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
 
@@ -520,21 +524,27 @@ export default function SettingsView({ settings, setSettings, onReloadManifest }
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px' }}>
               <span style={{ color: 'var(--text-muted)' }}>Maximaler RAM:</span>
-              <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>{formData.ramMax || 6} GB</span>
+              <span style={{ fontWeight: 700, color: 'var(--color-primary)' }}>{Math.min(formData.ramMax || 6, memory.maxGb)} GB</span>
             </div>
-            <input
-              type="range"
-              min="2"
-              max="16"
-              step="1"
-              value={formData.ramMax || 6}
-              onChange={(e) => setFormData(prev => ({ ...prev, ramMax: parseInt(e.target.value, 10) }))}
-              style={{ width: '100%', accentColor: 'var(--color-primary)', cursor: 'pointer' }}
+            <RamSlider
+              value={Math.min(formData.ramMax || 6, memory.maxGb)}
+              max={memory.maxGb}
+              onChange={(ram) => setFormData(prev => ({ ...prev, ramMax: ram }))}
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
               <span>2 GB (Minimum)</span>
-              <span>6 GB (Empfohlen)</span>
-              <span>16 GB</span>
+              <span>{memory.totalGb ? `Dein PC hat ${memory.totalGb} GB` : '6 GB (Empfohlen)'}</span>
+              <span>{memory.maxGb} GB</span>
+            </div>
+          </div>
+
+          <div>
+            <WindowFields
+              values={{ ...formData, windowMode: formData.windowMode || 'default' }}
+              onChange={(key, value) => setFormData(prev => ({ ...prev, [key]: value }))}
+            />
+            <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '8px' }}>
+              Gilt für alle Server und Instanzen. Ein Server oder eine Instanz kann in ihren eigenen Einstellungen davon abweichen, das geht dann vor.
             </div>
           </div>
 

@@ -37,7 +37,10 @@ import {
   sanitizeInstanceInput,
   createInstanceRecord,
   parseMrpackIndex,
-  isSafeRelativePath
+  isSafeRelativePath,
+  sanitizeLaunchOverrides,
+  resolveLaunchOptions,
+  maxAllocatableRamGb
 } from './instanceStore.js';
 
 // Threadpool für asynchrone I/O-Tasks auf 16 erhöhen, um Freezes zu verhindern
@@ -104,6 +107,9 @@ const defaultSettings = {
   enableAdminMode: false,
   ramMin: 2,
   ramMax: 6,
+  windowMode: 'default', // 'default' | 'custom' | 'fullscreen'
+  windowWidth: 1280,
+  windowHeight: 720,
   javaPath: '',
   username: 'Spieler',
   account: null,
@@ -1527,6 +1533,12 @@ function toRendererSettings(settings) {
   const { githubConfig, ...rendererSettings } = settings;
   return rendererSettings;
 }
+
+// Eingebauter Arbeitsspeicher (os.totalmem gilt für Windows, macOS und Linux gleich)
+ipcMain.handle('get-system-memory', () => ({
+  totalGb: Math.round((os.totalmem() / (1024 ** 3)) * 10) / 10,
+  maxGb: maxAllocatableRamGb(os.totalmem())
+}));
 
 ipcMain.handle('get-settings', () => toRendererSettings(getSettings()));
 
@@ -3036,185 +3048,26 @@ handleAdmin('modpack-update-changelog', async (event, { changelog, version, titl
 
 // ─── Modpack Handbuch & Anleitungen ─────────────────────────────────────────
 
+// Keine Beispiel-Anleitungen: Anleitungen kommen nur aus dem, was der Admin pro Server schreibt/veröffentlicht.
 function getDefaultGuides() {
-  return [
-    {
-      id: 'splinecart',
-      modSlug: 'pw_splinecart',
-      title: 'Splinecart (Achterbahnen & Fahrgeschäfte)',
-      iconUrl: 'https://cdn.modrinth.com/data/8k5WFoGm/3b2d8e3bf6bef7c2f42d34324e61f9469e2065af_96.webp',
-      summary: 'Erschaffe spektakuläre Achterbahnen, Loopings und Fahrgeschäfte mit stufenlosen Kurven und physikalischen Neigungen.',
-      chapters: [
-        {
-          id: 'spline-1',
-          title: '1. Schnellstart & Gleise verlegen',
-          content: `## Willkommen bei Splinecart!
-
-Mit **Splinecart** kannst du auf unserem Server echte, geschmeidige Achterbahnen und Hochgeschwindigkeitsstrecken bauen – ganz ohne abgehackte Vanilla-Gleise!
-
-### Erste Schritte:
-1. **Gleisanker platzieren:** Setze einen Gleisanker (*Track Anchor*) an den Startpunkt deiner geplanten Strecke.
-2. **Gleisbauer-Werkzeug nutzen:** Klicke mit der rechten Maustaste auf den Startanker und gehe zum nächsten Punkt.
-3. **Streckenverlauf bestimmen:** Klicke erneut, um den nächsten Anker zu verbinden. Das Gleis biegt sich automatisch in einer sanften Bézier-Kurve.
-
-### Steilkurven & Neigung (Banking):
-- Halte die **Shift-Taste** gedrückt, während du die Neigung des Gleises justierst.
-- In schnellen Kurven sorgt ein Schräglagen-Winkel von **20° bis 45°** dafür, dass die Lore physikalisch stabil bleibt und nicht entgleist!`,
-          images: []
-        },
-        {
-          id: 'spline-2',
-          title: '2. Antriebe, Bremsen & Stationen',
-          content: `### Geschwindigkeit kontrollieren
-
-Eine Achterbahn lebt vom Wechselspiel aus Geschwindigkeit und Nervenkitzel. Splinecart bietet dafür spezialisierte Gleistypen:
-
-- **Kettenlift (Chain Lift):** Zieht die Lore mit konstanter Geschwindigkeit steile Anstiege hinauf. Perfekt für den ersten Lifthill!
-- **Booster-Gleis (Powered Track):** Beschleunigt die Lore blitzschnell vor Steilkurven oder Loopings.
-- **Bremsschiene (Brake Track):** Reduziert sanft die Geschwindigkeit vor scharfen Kurven oder im Einfahrtsbereich des Bahnhofs.
-- **Stationsgleis:** Hält die Lore automatisch an. Durch ein **Redstone-Signal** (z. B. Knopf oder Hebel) oder wenn ein Spieler einsteigt, startet die Fahrt.`,
-          images: []
-        },
-        {
-          id: 'spline-3',
-          title: '3. Loopings, Korkenzieher & Tuning',
-          content: `### Meisterklasse: Loopings & Inversionen
-
-Du möchtest Fahrgäste kopfüber schicken? Kein Problem!
-
-1. Setze Ankerpunkte in einer vertikalen Schleife nach oben.
-2. Achte darauf, dass vor dem Looping ausreichend **Schwung** vorhanden ist (z. B. durch einen Drop oder Booster-Gleise).
-3. Verwende Korkenzieher-Kurven (Roll-Winkel bis 180°), um nahtlose Übergänge zwischen Loopings und Steilstrecken zu erzeugen.
-
-> **Sicherheits-Tipp:** Teste deine Strecke immer erst mit einer leeren Lore, bevor du Passagiere einsteigen lässt!`,
-          images: []
-        }
-      ]
-    },
-    {
-      id: 'saros-money',
-      modSlug: 'saros-money',
-      title: "Saro's Money (Wirtschaft & Münzen)",
-      iconUrl: 'https://cdn.modrinth.com/data/vRkO4kGw/27d54e7dcb39a0161b75e5795d9c602ca9202927_96.webp',
-      summary: 'Das Währungssystem auf unserem Server: Verdiene Münzen, eröffne Shops und handle mit anderen Spielern.',
-      chapters: [
-        {
-          id: 'money-1',
-          title: '1. Münzstufen & Währung',
-          content: `## Unser Wirtschaftssystem
-
-Auf unserem Server nutzen wir physische Münzen als stabiles Zahlungsmittel:
-
-- **Kupfermünze:** Die kleinste Einheit für den täglichen Bedarf.
-- **Silbermünze:** Wert = 10 Kupfermünzen.
-- **Goldmünze:** Wert = 10 Silbermünzen (= 100 Kupfermünzen).
-- **Platinmünze:** Wert = 10 Goldmünzen (= 1.000 Kupfermünzen) für Großprojekte und seltene Güter.
-
-### Münzen wechseln:
-Du kannst Münzen in der Werkbank (Crafting Table) jederzeit in höhere oder niedrigere Einheiten umwandeln (z. B. 10 Kupfer = 1 Silber und umgekehrt).`,
-          images: []
-        },
-        {
-          id: 'money-2',
-          title: '2. Geld verdienen & Handeln',
-          content: `### Wie komme ich an Geld?
-
-1. **Quests & Kopfgelder:** Erfülle Aufgaben an Schwarzen Brettern in Dörfern.
-2. **Rohstoff-Verkauf:** Verkaufe überschüssige Erze, Holz oder Nahrung an andere Spieler.
-3. **Eigene Shops eröffnen:** Baue eine Verkaufs-Kiste auf dem Marktplatz und biete Waren automatisch an.
-4. **Dienstleistungen:** Lass dich für Bauarbeiten, Transporte oder Streckennetze bezahlen.`,
-          images: []
-        },
-        {
-          id: 'money-3',
-          title: '3. Tresore & Sicherheit',
-          content: `### Schütze dein Vermögen!
-
-- Bewahre deine wertvollen Münzen in einem **gesperrten Tresor** oder deiner Ender-Kiste auf.
-- Verliere deine Geldbörse nicht im Kampf – halte immer nur das Geld bei dir, das du für den Einkauf benötigst!`,
-          images: []
-        }
-      ]
-    },
-    {
-      id: 'reliable-gliders',
-      modSlug: 'reliable-gliders',
-      title: 'Reliable Gliders (Gleitschirme)',
-      iconUrl: 'https://cdn.modrinth.com/data/pVIWsXir/5bd0978079f226fe04e6e6ed92daa3f8de503d62.png',
-      summary: 'Gleite sicher von Bergen, nutze thermische Aufwinde und reise schnell über die Welt.',
-      chapters: [
-        {
-          id: 'glider-1',
-          title: '1. Gleiter craften & Ausrüsten',
-          content: `## Sanftes Gleiten statt Fallschaden!
-
-Der Gleitschirm (*Glider*) ist dein treuer Begleiter zur Erkundung hoher Berge und weiter Landschaften.
-
-### Herstellung:
-- **Holz-Gleiter:** Der Einstieg. Benötigt Leder, Stöcke und Stoff/Wolle.
-- **Verstärkter Gleiter:** Hält deutlich länger und bietet bessere Flugeigenschaften.
-
-### Ausrüsten:
-Platziere den Gleiter in deinem Brustpanzer-Slot oder im Curios/Trinkets-Slot. Alternativ reicht es, ihn in der Hand zu halten und in der Luft Rechtsklick zu drücken.`,
-          images: []
-        },
-        {
-          id: 'glider-2',
-          title: '2. Flugtechnik & Thermik',
-          content: `### Steuerung in der Luft:
-- **Blick nach unten:** Schneller Flug, steilerer Sinkflug.
-- **Blick zum Horizont:** Maximaler Gleitwinkel, weite Distanz.
-- **Lagerfeuer & Lava-Aufwinde:** Wenn du über einem **Lagerfeuer (Campfire)** oder einem Lava-See fliegst, erzeugt die heiße Luft thermischen Auftrieb und trägt dich wieder nach oben!`,
-          images: []
-        }
-      ]
-    },
-    {
-      id: 'gravestones',
-      modSlug: 'pneumono_gravestones',
-      title: 'Gravestones (Grabsteine)',
-      iconUrl: 'https://cdn.modrinth.com/data/Heh3BbSv/e10b4d60fb1d7eb24044b8c40f0eec4346e5894a_96.webp',
-      summary: 'Kein Item-Verlust beim Tod: Deine Ausrüstung wird sicher in einem Grabstein verwahrt.',
-      chapters: [
-        {
-          id: 'grave-1',
-          title: '1. Automatisches Sichern beim Tod',
-          content: `## Keine Panik bei Missgeschicken!
-
-Wenn du auf unserem Server das Zeitliche segnest, verschwinden deine Items nicht im Nirgendwo und despawnen auch nicht nach 5 Minuten:
-
-1. An deinem Todesort entsteht sofort ein **Grabstein**.
-2. Alle getragenen Rüstungen, Werkzeuge und dein gesamtes Inventar werden sicher darin verstaut.
-3. Im Chat erhältst du die genauen **Koordinaten** und die Dimension deines Grabes.`,
-          images: []
-        },
-        {
-          id: 'grave-2',
-          title: '2. Grab bergen & Ausrüsten',
-          content: `### Items wiederholen:
-- Gehe zum Todespunkt zurück.
-- Klicke mit der rechten Maustaste (oder sneak-klicke) auf den Grabstein.
-- Deine Rüstung wird sofort wieder angezogen und die Items wandern in genau die gleichen Inventar-Slots zurück wie vor deinem Ableben!
-- Der Grabstein verschwindet danach automatisch.`,
-          images: []
-        }
-      ]
-    }
-  ];
+  return [];
 }
 
-ipcMain.handle('guides-get', async () => {
+// opts.remote: Spieler holen den aktuellen Stand immer von GitHub (sonst kämen Updates nie an),
+// Admins arbeiten mit ihrer lokalen Datei und holen nur bei leerer Liste nach.
+ipcMain.handle('guides-get', async (event, opts) => {
   try {
     let localGuides = readJsonFile(modpackGuidesPath(), null);
     const config = getGithubConfig();
+    const forceRemote = Boolean(opts && opts.remote);
 
-    if ((!localGuides || !localGuides.length) && config?.owner && config?.repo) {
+    if ((forceRemote || !localGuides || !localGuides.length) && config?.owner && config?.repo) {
       try {
         const endpoint = `/repos/${config.owner}/${config.repo}/contents/${GUIDES_FILE}?ref=${encodeURIComponent(config.branch || 'main')}`;
         const res = await githubRequest(endpoint);
         if (res.ok && res.data?.content) {
           const parsed = JSON.parse(Buffer.from(res.data.content, 'base64').toString('utf8'));
-          if (Array.isArray(parsed) && parsed.length > 0) {
+          if (Array.isArray(parsed) && (parsed.length > 0 || forceRemote)) {
             localGuides = parsed;
             writeJsonFile(modpackGuidesPath(), localGuides);
           }
@@ -3243,6 +3096,104 @@ ipcMain.handle('guides-save', async (event, guides) => {
     return { success: true };
   } catch (err) {
     console.error('Fehler beim Speichern der Anleitungen:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+const GUIDES_EXPORT_FORMAT = 'dp-launcher-guides';
+
+function normalizeImportedGuide(raw, index) {
+  if (!raw || typeof raw !== 'object') return null;
+  const title = String(raw.title || raw.name || '').trim();
+  if (!title) return null;
+  const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  const id = String(raw.id || '').trim() || slugify(title) || `guide-${index + 1}`;
+  const chaptersRaw = Array.isArray(raw.chapters) ? raw.chapters : [];
+  const chapters = chaptersRaw
+    .filter(c => c && typeof c === 'object' && (c.title || c.content))
+    .map((c, i) => ({
+      id: String(c.id || '').trim() || `${id}-${i + 1}`,
+      title: String(c.title || `${i + 1}. Kapitel`),
+      content: String(c.content || ''),
+      images: Array.isArray(c.images)
+        ? c.images.filter(img => img && typeof img.url === 'string').map(img => ({ url: img.url, caption: String(img.caption || '') }))
+        : [],
+      ...(c.modSlug ? { modSlug: String(c.modSlug), modName: String(c.modName || c.modSlug), modIconUrl: typeof c.modIconUrl === 'string' ? c.modIconUrl : '' } : {})
+    }));
+  if (chapters.length === 0) {
+    chapters.push({ id: `${id}-1`, title: '1. Einstieg & Grundlagen', content: '', images: [] });
+  }
+  return {
+    id,
+    modSlug: String(raw.modSlug || raw.slug || id),
+    title,
+    iconUrl: typeof raw.iconUrl === 'string' ? raw.iconUrl : '',
+    summary: String(raw.summary || ''),
+    createdAt: Number(raw.createdAt) || Date.now(),
+    updatedAt: Date.now(),
+    chapters
+  };
+}
+
+// Export: ids = Liste der Anleitungs-IDs, oder leer/null für alle
+ipcMain.handle('guides-export', async (event, ids) => {
+  try {
+    const all = readJsonFile(modpackGuidesPath(), []);
+    const wanted = Array.isArray(ids) && ids.length > 0 ? new Set(ids) : null;
+    const guides = (Array.isArray(all) ? all : []).filter(g => !wanted || wanted.has(g.id));
+    if (guides.length === 0) throw new Error('Es gibt nichts zu exportieren.');
+
+    const single = guides.length === 1;
+    const baseName = single ? (guides[0].id || 'anleitung') : 'anleitungen';
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: single ? 'Anleitung exportieren' : 'Alle Anleitungen exportieren',
+      defaultPath: `${baseName}.json`,
+      filters: [{ name: 'JSON (*.json)', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+
+    const payload = {
+      format: GUIDES_EXPORT_FORMAT,
+      version: 1,
+      hinweis: 'Anleitungen für den dP-Launcher. "chapters[].content" ist Markdown (## Überschrift, **fett**, *kursiv*, - Liste, 1. Liste, > Infobox, [Text](url), ![Bildtitel](url)). Beim Import wird eine Anleitung mit gleicher "id" ersetzt, neue "id"s werden hinzugefügt.',
+      guides
+    };
+    fs.writeFileSync(result.filePath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+    return { success: true, count: guides.length, filePath: result.filePath };
+  } catch (err) {
+    console.error('Fehler beim Export der Anleitungen:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Import: liest eine JSON-Datei und gibt die geprüften Anleitungen zurück (Zusammenführen macht die Oberfläche)
+ipcMain.handle('guides-import', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Anleitungen importieren',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON (*.json)', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePaths.length) return { success: false, canceled: true };
+
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(result.filePaths[0], 'utf8'));
+    } catch (e) {
+      throw new Error(`Die Datei ist kein gültiges JSON (${e.message}).`);
+    }
+
+    let list;
+    if (Array.isArray(parsed)) list = parsed;
+    else if (parsed && Array.isArray(parsed.guides)) list = parsed.guides;
+    else if (parsed && typeof parsed === 'object' && (parsed.chapters || parsed.title)) list = [parsed];
+    else throw new Error('Die Datei enthält keine Anleitungen.');
+
+    const guides = list.map(normalizeImportedGuide).filter(Boolean);
+    if (guides.length === 0) throw new Error('Keine gültige Anleitung gefunden (jede braucht mindestens einen "title").');
+    return { success: true, guides, skipped: list.length - guides.length };
+  } catch (err) {
+    console.error('Fehler beim Import der Anleitungen:', err);
     return { success: false, error: err.message };
   }
 });
@@ -4187,7 +4138,9 @@ ipcMain.handle('servers-add', (event, input) => {
   if (!clean.ok) return { success: false, error: clean.error };
 
   const servers = getServers();
-  const record = createServerRecord(clean.server, servers.map(server => server.folder));
+  const launchClean = sanitizeLaunchOverrides(input);
+  if (!launchClean.ok) return { success: false, error: launchClean.error };
+  const record = { ...createServerRecord(clean.server, servers.map(server => server.folder)), ...launchClean.launch };
   record.banner = clean.server.banner ? writeBannerFile(record.id, clean.server.banner) : '';
   ensureInstanceFolders(getInstanceDir(record));
   const nextActive = getSettings().activeServerId && servers.some(s => s.id === getSettings().activeServerId)
@@ -4206,8 +4159,12 @@ ipcMain.handle('servers-update', (event, { id, data }) => {
   const clean = sanitizeServerInput({ ...current, ...data, github: data?.github ?? `${current.owner}/${current.repo}` });
   if (!clean.ok) return { success: false, error: clean.error };
 
+  const launchClean = sanitizeLaunchOverrides({ ...current, ...data });
+  if (!launchClean.ok) return { success: false, error: launchClean.error };
+
   const updated = {
     ...current,
+    ...launchClean.launch,
     name: clean.server.name,
     description: clean.server.description,
     mapUrl: clean.server.mapUrl,
@@ -4468,7 +4425,7 @@ ipcMain.handle('instances-update', (event, { id, data }) => {
   const clean = sanitizeInstanceInput({ ...current, ...data });
   if (!clean.ok) return { success: false, error: clean.error };
 
-  const updated = { ...current, name: clean.instance.name, gameVersion: clean.instance.gameVersion, loader: clean.instance.loader, ramMax: clean.instance.ramMax };
+  const updated = { ...current, name: clean.instance.name, gameVersion: clean.instance.gameVersion, loader: clean.instance.loader, ramMax: clean.instance.ramMax, windowMode: clean.instance.windowMode, windowWidth: clean.instance.windowWidth, windowHeight: clean.instance.windowHeight };
   if (clean.instance.gameVersion !== current.gameVersion || clean.instance.loader !== current.loader) updated.loaderVersion = '';
 
   if (clean.instance.name !== current.name) {
@@ -4531,7 +4488,7 @@ ipcMain.handle('instances-launch', (event, id) => {
     gameVersion: instance.gameVersion,
     loader: instance.loader,
     loaderVersion: instance.loaderVersion,
-    ramMax: instance.ramMax || undefined
+    launchOverrides: instance
   });
 });
 
@@ -6128,7 +6085,7 @@ ipcMain.handle('launch-game', (event, launchConfig) => {
   if (!server) return { success: false, error: 'Es ist kein Server ausgewählt. Lege im Reiter Server einen an.' };
   ensureInstanceFolders();
   markPlayed('server', server.id);
-  return launchMinecraft({ ...launchConfig, instanceDir: getInstanceDir() });
+  return launchMinecraft({ ...launchConfig, launchOverrides: server, instanceDir: getInstanceDir() });
 });
 
 // Startet den gespeicherten Entwurf in einer eigenen Instanz. Assets, Bibliotheken und
@@ -6312,7 +6269,10 @@ async function launchMinecraft(launchConfig = {}) {
       }
     }
 
-    const ramMax = launchConfig.ramMax || settings.ramMax || 6;
+    const launchOptions = resolveLaunchOptions(settings, launchConfig.launchOverrides);
+    const ramCap = maxAllocatableRamGb(os.totalmem());
+    const ramMax = Math.min(launchOptions.ramMax, ramCap);
+    if (ramMax < launchOptions.ramMax) emitGameLog(`[Launcher] Arbeitsspeicher von ${launchOptions.ramMax}G auf ${ramMax}G begrenzt (dieser PC hat weniger RAM).`);
     const ramMin = Math.min(settings.ramMin || 2, ramMax);
     const gameVersion = launchConfig.gameVersion || '26.3';
     const loader = (launchConfig.loader || 'fabric').toLowerCase();
@@ -6446,6 +6406,8 @@ async function launchMinecraft(launchConfig = {}) {
       },
       javaPath: finalJavaPath,
       quickPlay: quickPlayOpt,
+      ...(launchOptions.windowMode === 'fullscreen' ? { window: { fullscreen: true } } : {}),
+      ...(launchOptions.windowMode === 'custom' ? { window: { width: launchOptions.windowWidth, height: launchOptions.windowHeight } } : {}),
       ...(launchConfig.instanceDir ? { overrides: { gameDirectory: launchConfig.instanceDir } } : {})
     };
 

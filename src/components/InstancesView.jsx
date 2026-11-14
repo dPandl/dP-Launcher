@@ -5,6 +5,7 @@ import { getServers, getActiveServer } from '../utils/serverAddress';
 import { ModrinthService } from '../services/modrinthService';
 import { registerBackHandler } from '../utils/navigation';
 import Dropdown from './common/Dropdown';
+import WindowFields, { launchFormValues, launchPayload } from './common/WindowFields';
 import { useServerBannerSrc } from './common/ServerHeading';
 import Dialog from './common/Dialog';
 import ModrinthBrowser from './modrinth/ModrinthBrowser';
@@ -26,7 +27,7 @@ function lastPlayedServer(settings) {
 }
 
 // Eingabefelder für Name, Version, Loader und Speicher einer Instanz
-function InstanceFields({ values, setValues, versions, loadingVersions }) {
+function InstanceFields({ values, setValues, versions, loadingVersions, settings }) {
   const set = (key, value) => setValues(prev => ({ ...prev, [key]: value }));
   const versionOptions = versions.includes(values.gameVersion) || !values.gameVersion ? versions : [values.gameVersion, ...versions];
   return (
@@ -52,8 +53,9 @@ function InstanceFields({ values, setValues, versions, loadingVersions }) {
       </div>
       <div>
         <label style={labelStyle}>Arbeitsspeicher in GB (leer = Einstellung des Launchers)</label>
-        <input type="text" inputMode="numeric" value={values.ramMax} onChange={(e) => set('ramMax', e.target.value.replace(/[^0-9]/g, ''))} placeholder="z. B. 6" style={{ width: '100%' }} />
+        <input type="text" inputMode="numeric" value={values.ramMax} onChange={(e) => set('ramMax', e.target.value.replace(/[^0-9]/g, ''))} placeholder={`Einstellung: ${settings?.ramMax || 6} GB`} style={{ width: '100%' }} />
       </div>
+      <WindowFields values={values} onChange={set} inherit globalSettings={settings} />
     </div>
   );
 }
@@ -259,7 +261,7 @@ export default function InstancesView({ settings, onQuickStart, onOpenMods }) {
   const failed = (res) => appAlert(res?.error || 'Das hat nicht geklappt.', { warning: true });
 
   const openCreate = () => {
-    setValues({ name: '', gameVersion: latest || '', loader: 'fabric', ramMax: '' });
+    setValues({ name: '', gameVersion: latest || '', loader: 'fabric', ...launchFormValues(null) });
     setDialog({ type: 'create' });
   };
 
@@ -268,7 +270,7 @@ export default function InstancesView({ settings, onQuickStart, onOpenMods }) {
   }, [latest, dialog?.type]);
 
   const openEdit = (instance) => {
-    setValues({ name: instance.name, gameVersion: instance.gameVersion, loader: instance.loader, ramMax: instance.ramMax ? String(instance.ramMax) : '' });
+    setValues({ name: instance.name, gameVersion: instance.gameVersion, loader: instance.loader, ...launchFormValues(instance) });
     setDialog({ type: 'edit', instance });
   };
 
@@ -276,7 +278,7 @@ export default function InstancesView({ settings, onQuickStart, onOpenMods }) {
     if (!hasApp) return appAlert('Das geht nur in der App.', { warning: true });
     setBusy(true);
     try {
-      const payload = { ...values, ramMax: values.ramMax || null };
+      const payload = { ...values, ...launchPayload(values) };
       const res = dialog.type === 'create'
         ? await window.electronAPI.createInstance(payload)
         : await window.electronAPI.updateInstance(dialog.instance.id, payload);
@@ -477,7 +479,7 @@ export default function InstancesView({ settings, onQuickStart, onOpenMods }) {
       {/* Instanz erstellen oder bearbeiten */}
       {(dialog?.type === 'create' || dialog?.type === 'edit') && (
         <Dialog title={dialog.type === 'create' ? 'Instanz erstellen' : 'Instanz bearbeiten'} icon={Box} onClose={() => setDialog(null)} busy={busy}>
-          <InstanceFields values={values} setValues={setValues} versions={versions} loadingVersions={loadingVersions} />
+          <InstanceFields values={values} setValues={setValues} versions={versions} loadingVersions={loadingVersions} settings={settings} />
           {dialog.type === 'edit' && dialog.instance.modpack && (
             <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '12px 0 0' }}>
               Diese Instanz stammt aus einem Modpack. Eine andere Minecraft-Version passt meist nicht zu seinen Mods.

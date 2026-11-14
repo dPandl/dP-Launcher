@@ -409,6 +409,7 @@ export default function App() {
                 <GuidesView
                   isAdmin={isAdmin}
                   manifest={manifest}
+                  settings={settings}
                 />
               )}
 

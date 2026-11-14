@@ -1,6 +1,7 @@
 import ServerHeading from './common/ServerHeading';
 import React, { useState, useEffect } from 'react';
-import { Play, RefreshCw, CheckCircle2, AlertCircle, Server, Terminal, FolderOpen, ShieldCheck, LogIn, Copy, Check, Square, Package, X } from 'lucide-react';
+import { Play, RefreshCw, CheckCircle2, AlertCircle, Server, Terminal, FolderOpen, ShieldCheck, LogIn, Copy, Check, Square, Package, X, SlidersHorizontal } from 'lucide-react';
+import ServerLaunchSettings from './common/ServerLaunchSettings';
 import { ModrinthService } from '../services/modrinthService';
 import { compareVersions, getManifestMods } from '../../modpackUtils.js';
 import { appAlert } from '../utils/appDialog';
@@ -21,6 +22,7 @@ export default function PlayView({ manifest, activeSeason, settings, account, on
   const [syncCompleted, setSyncCompleted] = useState(false);
   const [logs, setLogs] = useState([]);
   const [showLogs, setShowLogs] = useState(false);
+  const [showLaunchSettings, setShowLaunchSettings] = useState(false);
   const [isPreparingLaunch, setIsPreparingLaunch] = useState(false);
   const [copiedLogs, setCopiedLogs] = useState(false);
   const [gameStatus, setGameStatus] = useState({ status: 'idle', message: '', percent: 0 });
@@ -303,7 +305,17 @@ export default function PlayView({ manifest, activeSeason, settings, account, on
           <ServerHeading manifest={manifest} server={activeServer} />
         </div>
 
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setShowLaunchSettings(true)}
+            title="Starteinstellungen: RAM und Fenster"
+            aria-label="Starteinstellungen"
+            style={{ padding: '14px', borderRadius: '999px', display: 'flex' }}
+          >
+            <SlidersHorizontal size={20} />
+          </button>
           {account ? (
             isGameRunning ? (
               <button
@@ -346,6 +358,10 @@ export default function PlayView({ manifest, activeSeason, settings, account, on
           )}
         </div>
       </div>
+
+      {showLaunchSettings && (
+        <ServerLaunchSettings server={activeServer} settings={settings} onClose={() => setShowLaunchSettings(false)} />
+      )}
 
       {/* Eigene Mods mussten an eine geänderte Modliste angepasst werden */}
       {userModNotices.length > 0 && (

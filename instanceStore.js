@@ -16,6 +16,50 @@ function cleanText(value) {
   return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+export const WINDOW_MODES = ['default', 'custom', 'fullscreen'];
+
+function cleanInt(value, min, max) {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) return undefined;
+  return number;
+}
+
+// Arbeitsspeicher und Fenster eines Servers oder einer Instanz. null = Einstellung des Launchers.
+export function sanitizeLaunchOverrides(input) {
+  const ramMax = cleanInt(input?.ramMax, 1, 64);
+  if (ramMax === undefined) return { ok: false, error: 'Der Arbeitsspeicher muss zwischen 1 und 64 GB liegen.' };
+
+  const mode = String(input?.windowMode ?? '').toLowerCase();
+  const windowMode = WINDOW_MODES.includes(mode) ? mode : null;
+  const windowWidth = cleanInt(input?.windowWidth, 320, 16000);
+  const windowHeight = cleanInt(input?.windowHeight, 240, 16000);
+  if (windowWidth === undefined || windowHeight === undefined) return { ok: false, error: 'Die Fenstergröße ist ungültig (mindestens 320 × 240).' };
+  if (windowMode === 'custom' && (!windowWidth || !windowHeight)) return { ok: false, error: 'Gib für ein eigenes Fenster Breite und Höhe an.' };
+
+  return { ok: true, launch: { ramMax, windowMode, windowWidth, windowHeight } };
+}
+
+// Wie viel Arbeitsspeicher Minecraft höchstens bekommen kann: der gesamte eingebaute RAM (mindestens 2, höchstens 64 GB)
+export function maxAllocatableRamGb(totalBytes) {
+  const totalGb = Number(totalBytes) / (1024 ** 3);
+  if (!Number.isFinite(totalGb) || totalGb <= 0) return 16;
+  return Math.max(2, Math.min(64, Math.floor(totalGb)));
+}
+
+// Wirksame Werte: eigene Werte des Servers/der Instanz gehen vor den globalen Einstellungen
+export function resolveLaunchOptions(settings, overrides) {
+  const pick = (key, fallback) => (overrides?.[key] ? overrides[key] : (settings?.[key] || fallback));
+  const windowMode = overrides?.windowMode || (WINDOW_MODES.includes(settings?.windowMode) ? settings.windowMode : 'default');
+  const customSource = overrides?.windowMode ? overrides : settings;
+  return {
+    ramMax: pick('ramMax', 6),
+    windowMode,
+    windowWidth: Number(customSource?.windowWidth) || 1280,
+    windowHeight: Number(customSource?.windowHeight) || 720
+  };
+}
+
 export function sanitizeInstanceInput(input) {
   const name = cleanText(input?.name).slice(0, NAME_MAX);
   if (!name) return { ok: false, error: 'Die Instanz braucht einen Namen.' };
@@ -26,14 +70,10 @@ export function sanitizeInstanceInput(input) {
   const loader = cleanText(input?.loader).toLowerCase() || 'fabric';
   if (!SUPPORTED_LOADERS.includes(loader)) return { ok: false, error: 'Dieser Loader wird nicht unterstützt (Fabric oder Vanilla).' };
 
-  let ramMax = null;
-  if (input?.ramMax !== undefined && input?.ramMax !== null && input?.ramMax !== '') {
-    const value = Number(input.ramMax);
-    if (!Number.isInteger(value) || value < 1 || value > 64) return { ok: false, error: 'Der Arbeitsspeicher muss zwischen 1 und 64 GB liegen.' };
-    ramMax = value;
-  }
+  const launch = sanitizeLaunchOverrides(input);
+  if (!launch.ok) return launch;
 
-  return { ok: true, instance: { name, gameVersion, loader, ramMax } };
+  return { ok: true, instance: { name, gameVersion, loader, ...launch.launch } };
 }
 
 export function createInstanceRecord(clean, takenFolders, extra = {}) {
@@ -45,6 +85,9 @@ export function createInstanceRecord(clean, takenFolders, extra = {}) {
     loader: clean.loader,
     loaderVersion: '',
     ramMax: clean.ramMax ?? null,
+    windowMode: clean.windowMode ?? null,
+    windowWidth: clean.windowWidth ?? null,
+    windowHeight: clean.windowHeight ?? null,
     modpack: null,
     createdAt: new Date().toISOString(),
     lastPlayedAt: null,

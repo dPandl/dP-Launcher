@@ -302,9 +302,9 @@ body {
 }
 
 .nav-item.active .nav-icon-wrap {
-  background: var(--bg-card);
-  color: var(--color-primary);
-  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.18);
+  background: var(--color-gradient, var(--color-primary));
+  color: #ffffff;
+  box-shadow: 0 2px 10px var(--color-glow, rgba(2, 132, 199, 0.18));
 }
 
 .nav-item:active {
@@ -1122,7 +1122,7 @@ textarea:focus,
 
 .progress-bar-fill {
   height: 100%;
-  background: var(--color-primary);
+  background: var(--color-gradient, var(--color-primary));
   border-radius: 999px;
   transition: width 0.2s ease;
 }
@@ -4079,6 +4079,21 @@ textarea:focus,
   transition: all 0.15s ease;
 }
 
+.guide-chapter-item-move {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+}
+
+.guide-chapter-item-move:hover {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
 .guide-chapter-item-delete:hover {
   color: #ef4444;
   background: rgba(239, 68, 68, 0.15);
@@ -4490,7 +4505,8 @@ textarea:focus,
 .guides-top-header { flex-wrap: wrap; }
 .guides-top-header > div:first-child { flex: 1 1 260px; min-width: 0; }
 .guides-header-actions { flex-wrap: wrap; flex-shrink: 1; min-width: 0; }
-.guides-header-actions > button { white-space: nowrap; }
+.guides-header-actions > button { white-space: nowrap; padding: 6px 12px; font-size: 12.5px; gap: 6px !important; }
+.guides-header-actions { gap: 6px; }
 .guide-hero-badge-wrap > div { min-width: 0; }
 .guide-hero-badge-wrap h2 + button, .guide-hero-badge-wrap > div > div:first-child { flex-wrap: wrap; }
 .guide-detail-title { overflow-wrap: anywhere; }
@@ -4533,6 +4549,8 @@ textarea:focus,
 .guide-overview-title { font-size: 17px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
 .guide-overview-summary { margin: 0; flex: 1; font-size: 13.5px; line-height: 1.5; color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .guide-overview-foot { display: flex; align-items: center; gap: 8px; }
+.guide-overview-card.is-fresh { border-color: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary), 0 6px 20px color-mix(in srgb, var(--color-primary) 22%, transparent); }
+.guide-fresh-badge { padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; background: var(--color-primary); color: #fff; letter-spacing: .02em; }
 @media (prefers-reduced-motion: reduce) { .guide-overview-card, .guide-overview-arrow { transition: none; } .guide-overview-card:hover { transform: none; } }
 
 /* ─── Config-Editor: bei schmalem Platz erst die Dateiliste, dann der Editor ──── */
@@ -4626,4 +4644,32 @@ textarea:focus,
   justify-content: center;
   text-align: center;
   padding: 40px 28px;
+}
+
+/* RAM-Slider: letztes Drittel der Leiste rot */
+.ram-slider { position: relative; height: 22px; }
+.ram-slider-track {
+  position: absolute; left: 0; right: 0; top: 50%; height: 6px; transform: translateY(-50%); border-radius: 999px;
+  background: #ef4444;
+}
+/* Sicherer Bereich mit dem Theme-Verlauf wie beim Spielen-Knopf */
+.ram-slider-track::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 66.6%; border-radius: 999px 0 0 999px;
+  background: var(--color-gradient, var(--color-primary));
+}
+.ram-slider input[type="range"] {
+  position: absolute; inset: 0; width: 100%; margin: 0; padding: 0; background: transparent; cursor: pointer;
+  border: none; border-radius: 0; box-shadow: none; outline: none;
+  -webkit-appearance: none; appearance: none;
+}
+.ram-slider input[type="range"]:focus { border: none; box-shadow: none; }
+.ram-slider input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px var(--color-primary-soft); }
+.ram-slider input[type="range"]::-webkit-slider-runnable-track { background: transparent; height: 22px; }
+.ram-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--color-primary); box-shadow: 0 1px 4px rgba(0,0,0,0.4); margin-top: 2px;
+}
+.ram-slider-warning {
+  display: flex; gap: 8px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; font-size: 12.5px; line-height: 1.4;
+  color: #f87171; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.4);
 }

@@ -114,6 +114,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Settings & Manifest
+  getSystemMemory: () => ipcRenderer.invoke('get-system-memory'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
 
@@ -157,10 +158,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   testGithubConnection: () => ipcRenderer.invoke('github-test-connection'),
 
   // Handbuch & Mod-Guides
-  getGuides: () => ipcRenderer.invoke('guides-get'),
+  getGuides: (opts) => ipcRenderer.invoke('guides-get', opts),
   saveGuides: (guides) => ipcRenderer.invoke('guides-save', guides),
   uploadGuideImage: () => ipcRenderer.invoke('guides-upload-image'),
   publishGuides: () => ipcRenderer.invoke('guides-publish'),
+  exportGuides: (ids) => ipcRenderer.invoke('guides-export', ids),
+  importGuides: () => ipcRenderer.invoke('guides-import'),
 
   // Auto-Update (GitHub Pages & Releases)
   checkForUpdate: (currentVersion) => ipcRenderer.invoke('check-for-update', currentVersion),

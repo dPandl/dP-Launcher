@@ -1,5 +1,28 @@
 export const releaseNotes = [
   {
+    version: '0.1.9',
+    date: '14.11.2026',
+    title: 'Starteinstellungen für RAM und Fenster, bessere Anleitungen',
+    whatsNew: [
+      'Neben „Spielen“ öffnet ein Knopf die Starteinstellungen des Servers: Arbeitsspeicher per Slider und Fenster (Standard, eigene Größe, Vollbild)',
+      'RAM und Fenster lassen sich auch global in den Einstellungen und pro Instanz festlegen, eigene Werte gehen vor den globalen',
+      'Der RAM-Slider richtet sich nach dem Arbeitsspeicher des PCs, das letzte Drittel ist rot und warnt',
+      'Anleitungen gehören zum gewählten Server, mit Server-Auswahl auf der Seite',
+      'Admins können Anleitungen als JSON exportieren und importieren, auch einzelne',
+      'Mod-Auswahl für Anleitungen und Kapitel mit Mehrfachauswahl, Anzahl der Anleitungen pro Mod, Filter „Ohne Anleitung“ und Sortierung',
+      'Allgemeine Anleitungen, deren Kapitel mit Mods verknüpft sind, und Kapitel lassen sich per Pfeile umsortieren',
+      'Neue und aktualisierte Anleitungen sind hervorgehoben, bis du sie gesehen hast, und lassen sich nach „zuletzt aktualisiert“ sortieren',
+      'Nach „Backup erstellen & Testen“ fragt der Launcher, ob der Server neu gestartet werden soll'
+    ],
+    bugFixes: [
+      'Die Beispiel-Anleitungen erscheinen nicht mehr im Launcher',
+      'Beim Zurückgehen in der Anleitungs-Bearbeitung kommt die Verwerfen-Frage sofort und „Bearbeiten“ öffnet nicht mehr die erste Anleitung'
+    ],
+    adjustments: [
+      'Der Theme-Verlauf färbt jetzt das aktive Menü-Icon und die Fortschrittsbalken'
+    ]
+  },
+  {
     version: '0.1.8',
     date: '13.11.2026',
     title: 'Genauere Config-Anzeige beim Veröffentlichen',
