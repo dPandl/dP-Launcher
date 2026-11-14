@@ -1,5 +1,15 @@
 export const releaseNotes = [
   {
+    version: '0.1.8',
+    date: '13.11.2026',
+    title: 'Genauere Config-Anzeige beim Veröffentlichen',
+    whatsNew: [],
+    bugFixes: [
+      'Beim Veröffentlichen gelten Configs nicht mehr als geändert, wenn sich nur Zeitstempel-Kommentare oder Zeilenenden unterscheiden (zum Beispiel iris.properties)'
+    ],
+    adjustments: []
+  },
+  {
     version: '0.1.7',
     date: '13.11.2026',
     title: 'Configs, Shader und Ressourcenpakete kommen bei Spielern an',

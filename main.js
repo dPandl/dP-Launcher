@@ -6188,6 +6188,14 @@ handleAdmin('modpack-update-configs', async (event, { selected = [], forced = []
   }
 });
 
+// Vergleich ohne Rauschen: Zeilenenden und Leerraum am Ende zählen nicht, bei .properties auch keine Kommentarzeilen
+// (Java schreibt dort bei jedem Speichern einen Zeitstempel hinein, zum Beispiel in iris.properties)
+function normalizeConfigForCompare(key, text) {
+  let lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n').map(line => line.replace(/\s+$/, ''));
+  if (/\.properties$/i.test(key)) lines = lines.filter(line => !line.startsWith('#'));
+  return lines.join('\n').trim();
+}
+
 // Welche ausgewählten Configs gegenüber dem veröffentlichten Stand neu, geändert oder entfernt sind
 handleAdmin('modpack-config-changes', async (event, { selected = [], forced = [] } = {}) => {
   try {
@@ -6208,7 +6216,7 @@ handleAdmin('modpack-config-changes', async (event, { selected = [], forced = []
       try { content = fs.readFileSync(file, 'utf8'); } catch (_e) { continue; }
       const nowForced = (Array.isArray(forced) ? forced : []).includes(rel);
       if (!(key in pubConfigs)) changes.push({ relPath: key, type: 'added', forced: nowForced });
-      else if (pubConfigs[key] !== content) changes.push({ relPath: key, type: 'changed', forced: nowForced });
+      else if (normalizeConfigForCompare(key, pubConfigs[key]) !== normalizeConfigForCompare(key, content)) changes.push({ relPath: key, type: 'changed', forced: nowForced });
       else if (pubForce.has(key) !== nowForced) changes.push({ relPath: key, type: 'mode', forced: nowForced });
     }
     for (const key of Object.keys(pubConfigs)) {
