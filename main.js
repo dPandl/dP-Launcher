@@ -703,12 +703,6 @@ app.on('open-file', (event, filePath) => {
   if (filePath.toLowerCase().endsWith(`.${SERVER_FILE_EXTENSION}`)) handleOpenedServerFile(filePath);
 });
 
-// Steam Deck: Unter Wayland/Gamescope kommen Zeichen der Steam-Tastatur doppelt an (dirt -> ddiirrtt).
-// X11 (XWayland) vermeidet das doppelte Texteingabe-Protokoll.
-if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('ozone-platform', 'x11');
-}
-
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return;
   migrateLegacySetup();
@@ -6640,6 +6634,8 @@ ipcMain.handle('download-and-install-update', async (event, downloadUrl) => {
         '#!/bin/sh',
         'sleep 2',
         `cp -rf "${sourceDir}/." "${appDir}/"`,
+        // Das ZIP (unter Windows gebaut) enthält keine Ausführrechte, sie müssen nach dem Kopieren gesetzt sein
+        `chmod +x "${process.execPath}" "${appDir}/chrome-sandbox" "${appDir}/chrome_crashpad_handler" 2>/dev/null`,
         `"${process.execPath}" &`,
         'rm -f "$0"'
       ].join('\n');

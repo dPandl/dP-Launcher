@@ -3,6 +3,9 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 import { startSegmented } from './utils/segmented.js';
+import { startDuplicateInputGuard } from './utils/duplicateInputGuard.js';
+
+startDuplicateInputGuard();
 
 // Gleitende Pille für alle Segmented Controls (Mods, Shader, Store Tabs etc.) starten
 startSegmented();

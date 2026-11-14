@@ -1,5 +1,17 @@
 export const releaseNotes = [
   {
+    version: '0.1.11',
+    date: '14.11.2026',
+    title: 'Steam Deck: Absturz im Desktop-Modus behoben',
+    whatsNew: [],
+    bugFixes: [
+      'Auf dem Steam Deck startet der Launcher im Desktop-Modus wieder (Version 0.1.10 stürzte dort beim Start ab)',
+      'Doppelte Zeichen bei der Steam-Tastatur werden jetzt direkt in den Eingabefeldern herausgefiltert',
+      'Nach einem Update unter Linux bleibt die Startdatei garantiert ausführbar'
+    ],
+    adjustments: []
+  },
+  {
     version: '0.1.10',
     date: '14.11.2026',
     title: 'Updates automatisch finden, Skin-Anzeige und Steam Deck',
