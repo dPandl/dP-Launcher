@@ -792,7 +792,7 @@ function mapPadTick(pad) {
   }
   mapButton('right', b(6));
   if (map.carry) {
-    if (!b(7)) {
+    if (!b(7) && !b(11)) {
       map.carry = false;
       cursor.down = false;
       cursor.lastMove = performance.now();
@@ -800,7 +800,7 @@ function mapPadTick(pad) {
       cursor.button = null;
     }
   } else {
-    mapButton('left', b(7));
+    mapButton('left', b(7) || b(11));
   }
 }
 
@@ -895,7 +895,8 @@ function startGamepadLoop() {
       }
 
       // Rechter Trigger: Maustaste halten und loslassen (so lässt sich auch ziehen)
-      const triggerDown = b(7) || (pad.buttons[7]?.value || 0) > 0.5;
+      // Rechter Trigger oder Druck auf den rechten Stick (R3)
+      const triggerDown = b(7) || (pad.buttons[7]?.value || 0) > 0.5 || b(11);
       if (triggerDown && !cursor.down) {
         cursor.down = true;
         cursor.button = 'left';

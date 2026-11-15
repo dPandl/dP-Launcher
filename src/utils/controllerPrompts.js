@@ -97,7 +97,7 @@ export function getHints({ device, platform, mode }) {
     { icons: [glyph(set.back)], label: 'Zurück' },
     { icons: [glyph(set.prev), glyph(set.next)], label: 'Reiter' },
     { icons: [glyph('rightstick')], label: 'Maus' },
-    { icons: [glyph(set.click)], label: 'Klicken' },
+    { icons: [glyph(set.click), glyph('rightstick')], label: 'Klicken' },
     { icons: [glyph(set.scrollTrigger), glyph('rightstick')], label: 'Scrollen' },
     { icons: [glyph(set.menu)], label: 'TV-Modus' }
   ];

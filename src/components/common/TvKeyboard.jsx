@@ -83,34 +83,48 @@ export default function TvKeyboard() {
   const live = useRef({});
   live.current = { field, layer, pos };
 
-  // Die Tastatur des Systems (z. B. die des Steam Decks) soll nicht zusätzlich aufgehen:
-  // inputmode="none" meldet den Feldern, dass keine Bildschirmtastatur gebraucht wird. Eine Hardware-Tastatur geht weiter.
+  // Die Tastatur des Systems (z. B. die des Steam Decks) soll nicht zusätzlich aufgehen. Sie öffnet sich nur bei
+  // Feldern, die das System als bearbeitbar meldet. Deshalb sind die Felder schreibgeschützt (inputmode="none" allein
+  // reicht nicht) und der Launcher trägt Eingaben selbst ein: Bildschirmtastatur und Hardware-Tastatur.
   useEffect(() => {
     const touched = new Map();
     const mark = (el) => {
       if (!el || el.nodeType !== 1 || !isTextField(el) || touched.has(el)) return;
-      touched.set(el, [el.getAttribute('inputmode'), el.getAttribute('virtualkeyboardpolicy')]);
+      if (el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT') return;
+      touched.set(el, { mode: el.getAttribute('inputmode'), readOnly: el.readOnly });
       el.setAttribute('inputmode', 'none');
       el.setAttribute('virtualkeyboardpolicy', 'manual');
+      el.readOnly = true;
     };
     const markAll = (root) => {
       mark(root);
-      root.querySelectorAll?.('input, textarea, [contenteditable]').forEach(mark);
+      root.querySelectorAll?.('input, textarea').forEach(mark);
     };
     markAll(document.body);
     const observer = new MutationObserver(records => records.forEach(record => record.addedNodes.forEach(markAll)));
     observer.observe(document.body, { childList: true, subtree: true });
-    // Felder, die nur umgeschaltet werden oder Mausklicks/A zuerst sehen, rechtzeitig vor dem Fokus markieren
     const early = (event) => mark(event.target);
     document.addEventListener('pointerdown', early, true);
     document.addEventListener('focusin', early, true);
+    // Hardware-Tastatur: Zeichen selbst eintragen, weil die Felder schreibgeschützt sind
+    const onKeyDown = (event) => {
+      const el = event.target;
+      if (!touched.has(el) || touched.get(el).readOnly || event.isComposing) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key.length === 1) { event.preventDefault(); insertText(el, event.key); }
+      else if (event.key === 'Backspace') { event.preventDefault(); backspace(el); }
+      else if (event.key === 'Enter' && el.tagName === 'TEXTAREA') { event.preventDefault(); insertText(el, '\n'); }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
     return () => {
       observer.disconnect();
       document.removeEventListener('pointerdown', early, true);
       document.removeEventListener('focusin', early, true);
-      touched.forEach(([mode, policy], el) => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      touched.forEach(({ mode, readOnly }, el) => {
         if (mode === null) el.removeAttribute('inputmode'); else el.setAttribute('inputmode', mode);
-        if (policy === null) el.removeAttribute('virtualkeyboardpolicy'); else el.setAttribute('virtualkeyboardpolicy', policy);
+        el.removeAttribute('virtualkeyboardpolicy');
+        el.readOnly = readOnly;
       });
     };
   }, []);

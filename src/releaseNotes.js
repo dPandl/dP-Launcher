@@ -1,5 +1,17 @@
 export const releaseNotes = [
   {
+    version: '0.1.15',
+    date: '15.11.2026',
+    title: 'TV-Modus: R3 klickt, Systemtastatur bleibt zu',
+    whatsNew: [
+      'Im TV-Modus löst ein Druck auf den rechten Stick (R3) den linken Mausklick aus, wie der rechte Trigger'
+    ],
+    bugFixes: [
+      'Die Tastatur des Steam Decks öffnet sich nicht mehr zusätzlich, solange die Bildschirmtastatur des Launchers an ist. Eingaben gehen weiter über die Bildschirmtastatur und eine angeschlossene Tastatur'
+    ],
+    adjustments: []
+  },
+  {
     version: '0.1.14',
     date: '15.11.2026',
     title: 'TV-Modus: Zeiger und Tastatur über den Dialogen, keine doppelte Tastatur',
