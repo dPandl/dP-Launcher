@@ -4752,7 +4752,7 @@ textarea:focus,
   position: fixed;
   left: 0;
   top: 0;
-  z-index: 300000;
+  z-index: 2147483600; /* über allen Dialogen, auch den eigenen (bis 1000001) */
   width: 0;
   height: 0;
   pointer-events: none;
@@ -4840,7 +4840,7 @@ html.tv-osk-open .tv-hints {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 250000;
+  z-index: 2147483500; /* über allen Dialogen, unter dem Mauszeiger */
   padding: 12px 18px 10px;
   background: var(--bg-card);
   border-top: 1px solid var(--border-card);

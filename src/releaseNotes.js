@@ -1,5 +1,16 @@
 export const releaseNotes = [
   {
+    version: '0.1.14',
+    date: '15.11.2026',
+    title: 'TV-Modus: Zeiger und Tastatur über den Dialogen, keine doppelte Tastatur',
+    whatsNew: [],
+    bugFixes: [
+      'Im TV-Modus liegen der virtuelle Mauszeiger und die Bildschirmtastatur jetzt über allen Dialogen und nicht mehr darunter',
+      'Ist die Bildschirmtastatur des Launchers an, öffnet sich die Tastatur des Systems (zum Beispiel am Steam Deck) nicht mehr zusätzlich'
+    ],
+    adjustments: []
+  },
+  {
     version: '0.1.13',
     date: '15.11.2026',
     title: 'Zu Steam hinzufügen: Launcher als Nicht-Steam-Spiel mit Bildern',

@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import React, { useEffect, useReducer, useRef, useState } from 'react';
 import { Delete, ArrowBigUp, CornerDownLeft, ChevronLeft, ChevronRight } from 'lucide-react';
 import { isTextField, pickNext, setKeyboardHandler, wasJustActivated } from '../../utils/tvNavigation';
@@ -81,6 +82,38 @@ export default function TvKeyboard() {
   const rootRef = useRef(null);
   const live = useRef({});
   live.current = { field, layer, pos };
+
+  // Die Tastatur des Systems (z. B. die des Steam Decks) soll nicht zusätzlich aufgehen:
+  // inputmode="none" meldet den Feldern, dass keine Bildschirmtastatur gebraucht wird. Eine Hardware-Tastatur geht weiter.
+  useEffect(() => {
+    const touched = new Map();
+    const mark = (el) => {
+      if (!el || el.nodeType !== 1 || !isTextField(el) || touched.has(el)) return;
+      touched.set(el, [el.getAttribute('inputmode'), el.getAttribute('virtualkeyboardpolicy')]);
+      el.setAttribute('inputmode', 'none');
+      el.setAttribute('virtualkeyboardpolicy', 'manual');
+    };
+    const markAll = (root) => {
+      mark(root);
+      root.querySelectorAll?.('input, textarea, [contenteditable]').forEach(mark);
+    };
+    markAll(document.body);
+    const observer = new MutationObserver(records => records.forEach(record => record.addedNodes.forEach(markAll)));
+    observer.observe(document.body, { childList: true, subtree: true });
+    // Felder, die nur umgeschaltet werden oder Mausklicks/A zuerst sehen, rechtzeitig vor dem Fokus markieren
+    const early = (event) => mark(event.target);
+    document.addEventListener('pointerdown', early, true);
+    document.addEventListener('focusin', early, true);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('pointerdown', early, true);
+      document.removeEventListener('focusin', early, true);
+      touched.forEach(([mode, policy], el) => {
+        if (mode === null) el.removeAttribute('inputmode'); else el.setAttribute('inputmode', mode);
+        if (policy === null) el.removeAttribute('virtualkeyboardpolicy'); else el.setAttribute('virtualkeyboardpolicy', policy);
+      });
+    };
+  }, []);
 
   // Öffnen: Eingabefeld erhält den Fokus durch einen Klick oder A, nicht durch bloßes Anvisieren
   useEffect(() => {
@@ -203,7 +236,8 @@ export default function TvKeyboard() {
   const rows = LAYERS[layer];
   const hints = getKeyboardHints(prompt);
 
-  return (
+  // Direkt unter <body>, damit Dialoge nie über der Tastatur liegen
+  return createPortal(
     <div className="tv-osk" ref={rootRef} role="application" aria-label="Bildschirmtastatur">
       <div className="tv-osk-grid">
         {rows.flatMap((row, rowIndex) => {
@@ -248,6 +282,7 @@ export default function TvKeyboard() {
           </span>
         ))}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
