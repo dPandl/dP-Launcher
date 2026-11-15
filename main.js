@@ -2457,7 +2457,7 @@ async function githubRequest(endpoint, { method = 'GET', body = null } = {}) {
     method,
     headers: {
       'Accept': 'application/vnd.github+json',
-      'Authorization': `Bearer ${token}`,
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
       'User-Agent': 'Electron-Minecraft-Launcher/1.0',
       'X-GitHub-Api-Version': '2022-11-28',
       ...(body ? { 'Content-Type': 'application/json' } : {})
@@ -3206,14 +3206,23 @@ ipcMain.handle('guides-get', async (event, opts) => {
 
     if ((forceRemote || !localGuides || !localGuides.length) && config?.owner && config?.repo) {
       try {
-        const endpoint = `/repos/${config.owner}/${config.repo}/contents/${GUIDES_FILE}?ref=${encodeURIComponent(config.branch || 'main')}`;
-        const res = await githubRequest(endpoint);
-        if (res.ok && res.data?.content) {
-          const parsed = JSON.parse(Buffer.from(res.data.content, 'base64').toString('utf8'));
-          if (Array.isArray(parsed) && (parsed.length > 0 || forceRemote)) {
-            localGuides = parsed;
-            writeJsonFile(modpackGuidesPath(), localGuides);
-          }
+        let parsed = null;
+        // Spieler haben kein GitHub-Token: die öffentliche Datei kommt direkt von raw.githubusercontent.com
+        if (!config.token) {
+          const rawRes = await fetch(`https://raw.githubusercontent.com/${config.owner}/${config.repo}/${encodeURIComponent(config.branch || 'main')}/${GUIDES_FILE}`, {
+            headers: { 'User-Agent': 'Electron-Minecraft-Launcher/1.0', 'Cache-Control': 'no-cache' },
+            signal: AbortSignal.timeout(15000)
+          });
+          if (rawRes.ok) parsed = await rawRes.json();
+          else console.warn(`Guides: raw.githubusercontent.com antwortet mit HTTP ${rawRes.status}`);
+        } else {
+          const endpoint = `/repos/${config.owner}/${config.repo}/contents/${GUIDES_FILE}?ref=${encodeURIComponent(config.branch || 'main')}`;
+          const res = await githubRequest(endpoint);
+          if (res.ok && res.data?.content) parsed = JSON.parse(Buffer.from(res.data.content, 'base64').toString('utf8'));
+        }
+        if (Array.isArray(parsed) && (parsed.length > 0 || forceRemote)) {
+          localGuides = parsed;
+          writeJsonFile(modpackGuidesPath(), localGuides);
         }
       } catch (ghErr) {
         console.warn('Guides konnten nicht von GitHub geladen werden:', ghErr.message);

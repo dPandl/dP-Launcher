@@ -1,5 +1,15 @@
 export const releaseNotes = [
   {
+    version: '0.1.17',
+    date: '15.11.2026',
+    title: 'Anleitungen kommen wieder bei allen Spielern an',
+    whatsNew: [],
+    bugFixes: [
+      'Die Anleitungen des Servers werden bei Spielern wieder geladen und unter „Anleitungen“ angezeigt. Bisher scheiterte der Abruf ohne GitHub-Token'
+    ],
+    adjustments: []
+  },
+  {
     version: '0.1.16',
     date: '15.11.2026',
     title: 'Eigener Farbwähler, auch im TV-Modus bedienbar',
