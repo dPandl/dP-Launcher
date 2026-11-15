@@ -4956,3 +4956,23 @@ html.tv-osk-open .tv-hints {
   border: 1px solid var(--border-card);
   flex-shrink: 0;
 }
+
+/* Eigener Farbwähler */
+.cp-field-button { display: inline-flex; align-items: center; justify-content: center; border: 0; }
+.cp-field-dot { width: 100%; height: 100%; border-radius: 999px; border: 2px solid var(--bg-well); }
+.cp-dialog { max-width: 380px; display: flex; flex-direction: column; gap: 14px; }
+.cp-title { font-size: 17px; font-weight: 800; color: var(--text-main); margin: 0; }
+.cp-area { position: relative; width: 100%; height: 190px; border-radius: 14px; cursor: crosshair; touch-action: none; user-select: none; box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.12); }
+.cp-handle { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 999px; border: 3px solid #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.4); pointer-events: none; }
+.cp-slider-row { display: grid; grid-template-columns: 82px 1fr; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.cp-range { -webkit-appearance: none; appearance: none; width: 100%; height: 14px; border-radius: 999px; cursor: pointer; box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.12); }
+.cp-range-hue { background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.cp-range::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 999px; background: #fff; border: 3px solid var(--color-primary); box-shadow: 0 1px 5px rgb(0 0 0 / 0.4); }
+.cp-row { display: flex; align-items: center; gap: 12px; }
+.cp-preview { width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.15); }
+.cp-hex { flex: 1; font-family: monospace; font-size: 15px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border-card); background: var(--bg-well); color: var(--text-main); text-transform: lowercase; }
+.cp-quick { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.cp-quick-swatch { aspect-ratio: 1; border-radius: 999px; border: 0; cursor: pointer; box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.18); transition: transform .2s ease; }
+.cp-quick-swatch:hover { transform: scale(1.12); }
+.cp-actions { display: flex; justify-content: flex-end; }
+.cp-actions .btn-primary { display: inline-flex; align-items: center; gap: 6px; }

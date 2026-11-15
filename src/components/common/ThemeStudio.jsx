@@ -1,5 +1,6 @@
 import React from 'react';
-import { Check, Pipette, ArrowRight, Sparkles, Calendar, Flower2, Sun, Leaf, CloudSnow, Ban } from 'lucide-react';
+import ColorPicker from './ColorPicker';
+import { Check, ArrowRight, Sparkles, Calendar, Flower2, Sun, Leaf, CloudSnow, Ban } from 'lucide-react';
 
 const ACCENT_PRESETS = [
   { name: 'Blau', value: '#0284c7' },
@@ -50,7 +51,7 @@ function ColorField({ label, value, onChange }) {
     <div className="ts-field">
       <span className="ts-label">{label}</span>
       <div className="ts-field-row">
-        <input type="color" className="ts-color" value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} />
+        <ColorPicker value={value} onChange={onChange} label={label} />
         <span className="ts-hex">{value}</span>
       </div>
     </div>
@@ -89,18 +90,7 @@ export default function ThemeStudio({ customTheme, onUpdate, effect = 'sparks', 
               </button>
             );
           })}
-          <label
-            className={`ts-swatch ts-swatch-custom${!isPresetAccent ? ' ts-swatch-on' : ''}`}
-            title="Eigene Farbe"
-          >
-            <input
-              type="color"
-              value={theme.color1}
-              onChange={(e) => onUpdate({ color1: e.target.value })}
-              aria-label="Eigene Farbe"
-            />
-            <Pipette size={17} aria-hidden="true" />
-          </label>
+          <ColorPicker variant="swatch" value={theme.color1} active={!isPresetAccent} onChange={(color) => onUpdate({ color1: color })} label="Eigene Farbe" />
         </div>
       </section>
 

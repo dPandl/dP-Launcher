@@ -1,5 +1,15 @@
 export const releaseNotes = [
   {
+    version: '0.1.16',
+    date: '15.11.2026',
+    title: 'Eigener Farbwähler, auch im TV-Modus bedienbar',
+    whatsNew: [
+      'Neuer Farbwähler im Theme-Studio mit Farbfläche, Reglern für Farbton, Sättigung und Helligkeit, Hex-Feld und Schnellfarben. Er funktioniert mit Maus, Tastatur und im TV-Modus mit Controller und virtuellem Zeiger'
+    ],
+    bugFixes: [],
+    adjustments: []
+  },
+  {
     version: '0.1.15',
     date: '15.11.2026',
     title: 'TV-Modus: R3 klickt, Systemtastatur bleibt zu',
