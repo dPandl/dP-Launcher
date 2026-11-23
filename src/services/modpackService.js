@@ -12,98 +12,51 @@ function pickVersion(versions) {
   return versions.find(v => v.version_type === 'release') || versions[0] || null;
 }
 
-function buildModEntry(project, version, autoDependency) {
-  const file = version.files?.find(f => f.primary) || version.files?.[0];
-  if (!file?.hashes?.sha1) {
-    throw new Error(`${project.title}: Version ${version.version_number} hat keine Datei mit SHA-1`);
-  }
-  return {
-    slug: project.slug,
-    name: project.title,
-    iconUrl: project.icon_url || null,
-    side: deriveSide(project.client_side, project.server_side),
-    projectId: project.id,
-    versionId: version.id,
-    versionNumber: version.version_number,
-    filename: file.filename,
-    downloadUrl: file.url,
-    sha1: file.hashes.sha1,
-    size: file.size,
-    autoDependency,
-    dependencies: [],
-    addedAt: Date.now()
-  };
-}
-
-async function fetchLatestVersion(ref, draft) {
-  const versions = await ModrinthService.getProjectVersions(ref, {
+// Der Launcher liest die Mod-Dateien und sucht die neueste Version, die zu den Mods im Entwurf passt
+async function resolveForDraft(draft, ref, existingMods, versionId) {
+  const response = await window.electronAPI.resolveDraftMod({
+    projectRef: ref,
+    versionId: versionId || null,
+    existing: existingMods,
     gameVersion: draft.gameVersion,
     loader: draft.loader
   });
-  return pickVersion(versions);
+  if (!response?.success) throw new Error(response?.error || 'Die Mod konnte nicht geprüft werden.');
+  return response.result;
 }
 
-// Trägt die Pflicht-Abhängigkeiten einer Version ein und liefert deren Projekt-IDs
-async function addDependencies(version, ownerName, ownerSide, mods, draft, warnings) {
-  const dependencyIds = [];
-  for (const dep of version.dependencies || []) {
-    if (dep.dependency_type === 'incompatible') {
-      if (mods.some(m => m.projectId === dep.project_id)) {
-        warnings.push(`${ownerName} ist laut Modrinth nicht mit einer Mod im Entwurf kompatibel.`);
-      }
-      continue;
-    }
-    if (dep.dependency_type !== 'required') continue;
-
-    try {
-      const projectId = dep.project_id || (dep.version_id && (await ModrinthService.getVersion(dep.version_id)).project_id);
-      if (!projectId) {
-        warnings.push(`${ownerName}: Abhängigkeit „${dep.file_name || 'unbekannt'}“ ist nicht auf Modrinth und muss von Hand geprüft werden.`);
-        continue;
-      }
-      dependencyIds.push(projectId);
-      await addProject(projectId, { autoDependency: true, versionId: dep.version_id, requiredBySide: ownerSide }, mods, draft, warnings);
-    } catch (err) {
-      warnings.push(`${ownerName}: Abhängigkeit konnte nicht aufgelöst werden (${err.message}).`);
-    }
-  }
-  return dependencyIds;
+// Ergänzt die gewählten Dateien um Icon und Seite aus dem Modrinth-Projekt
+function buildEntries(selected) {
+  const addedAt = Date.now();
+  return Promise.all(selected.map(async (mod) => {
+    const project = await ModrinthService.getProject(mod.projectId);
+    return {
+      ...mod,
+      iconUrl: project.icon_url || null,
+      side: deriveSide(project.client_side, project.server_side),
+      addedAt
+    };
+  }));
 }
 
-async function addProject(ref, { autoDependency, versionId, requiredBySide }, mods, draft, warnings) {
-  const findExisting = (id) => mods.findIndex(m => m.projectId === id || m.slug === id);
-  let index = findExisting(ref);
-  const project = index === -1 ? await ModrinthService.getProject(ref) : null;
-  if (project) index = findExisting(project.id);
-
-  if (index !== -1) {
-    // Wenn eine Mod auf dem Client benötigt wird, darf eine vorhandene Abhängigkeit nicht nur auf Server stehen
-    if (requiredBySide && requiredBySide !== 'server' && mods[index].side === 'server') {
-      mods[index] = { ...mods[index], side: 'both' };
-    }
-    // Von Hand hinzugefügte Abhängigkeit bleibt ab jetzt auch ohne die andere Mod erhalten
-    if (!autoDependency && mods[index].autoDependency) {
-      mods[index] = { ...mods[index], autoDependency: false };
-    }
-    return;
-  }
-
-  const version = versionId
-    ? await ModrinthService.getVersion(versionId)
-    : await fetchLatestVersion(project.id, draft);
-  if (!version) {
-    throw new Error(`${project.title}: Keine Version für ${draft.gameVersion} (${draft.loader}) gefunden`);
-  }
-
-  const entry = buildModEntry(project, version, autoDependency);
-  // Wenn die übergeordnete Mod auf dem Client läuft, muss auch die Abhängigkeit auf dem Client vorhanden sein
-  if (requiredBySide && requiredBySide !== 'server' && entry.side === 'server') {
-    entry.side = 'both';
-  }
-
-  mods.push(entry);
-  entry.dependencies = await addDependencies(version, entry.name, entry.side, mods, draft, warnings);
+// Wenn eine Mod auf dem Client läuft, darf ihre Abhängigkeit nicht nur auf dem Server stehen
+function raiseClientDependencySides(mods, changedEntries) {
+  const neededOnClient = new Set(
+    changedEntries.filter(entry => entry.side !== 'server').flatMap(entry => entry.dependencies || [])
+  );
+  return mods.map(mod => (neededOnClient.has(mod.projectId) && mod.side === 'server' ? { ...mod, side: 'both' } : mod));
 }
+
+// Erklärt, warum nicht die neueste Version gewählt wurde
+function skippedWarnings(result, versionId) {
+  if (versionId || !result.skipped?.length) return result.warnings || [];
+  const first = result.skipped[0];
+  return [
+    ...(result.warnings || []),
+    `${result.chosen.name || result.project?.title}: Version ${first.versionNumber} passt nicht (${first.reason}), deshalb wurde ${result.chosen.versionNumber} gewählt.`
+  ];
+}
+
 
 // Entfernt automatisch hinzugefügte Abhängigkeiten, die keine eigenständige Mod mehr braucht
 function pruneOrphans(mods) {
@@ -120,10 +73,22 @@ function pruneOrphans(mods) {
 
 export async function addModToDraft(draft, project, { versionId } = {}) {
   const ref = typeof project === 'string' ? project : (project.project_id || project.id || project.slug);
-  const mods = [...draft.mods];
-  const warnings = [];
-  await addProject(ref, { autoDependency: false, versionId }, mods, draft, warnings);
-  return { draft: { ...draft, mods }, warnings };
+  const knownRefs = new Set([ref, project?.slug, project?.id, project?.project_id].filter(Boolean));
+  const existing = draft.mods.find(m => knownRefs.has(m.projectId) || knownRefs.has(m.slug));
+  if (existing) {
+    // Von Hand hinzugefügte Abhängigkeit bleibt ab jetzt auch ohne die andere Mod erhalten
+    const mods = existing.autoDependency
+      ? draft.mods.map(m => (m === existing ? { ...m, autoDependency: false } : m))
+      : draft.mods;
+    return { draft: { ...draft, mods }, warnings: [] };
+  }
+
+  const result = await resolveForDraft(draft, ref, draft.mods, versionId);
+  if (!result.ok) throw new Error(result.reason);
+
+  const entries = await buildEntries(result.selected);
+  const mods = raiseClientDependencySides([...draft.mods, ...entries], entries);
+  return { draft: { ...draft, mods }, warnings: skippedWarnings(result, versionId) };
 }
 
 export function removeModFromDraft(draft, slug) {
@@ -136,26 +101,41 @@ export function removeModFromDraft(draft, slug) {
   return { draft: { ...draft, mods }, warnings };
 }
 
-// Hebt eine Mod gezielt auf eine gewählte oder die neueste passende Version
-export async function updateModInDraft(draft, slug, { versionId } = {}) {
+// Hebt eine Mod gezielt auf eine gewählte oder die neueste passende Version.
+// Mit fallback wird bei einer nicht passenden Wunschversion die neueste passende gesucht.
+export async function updateModInDraft(draft, slug, { versionId, fallback = false } = {}) {
   const current = draft.mods.find(m => m.slug === slug);
   if (!current) throw new Error(`${slug} ist nicht im Entwurf`);
 
-  const project = await ModrinthService.getProject(current.projectId || slug);
-  const version = versionId
-    ? await ModrinthService.getVersion(versionId)
-    : await fetchLatestVersion(project.id, draft);
-  if (!version) throw new Error(`${current.name}: Keine Version für ${draft.gameVersion} gefunden`);
-  if (version.id === current.versionId) return { draft, updated: false, warnings: [] };
+  // Abhängigkeiten, die nur diese Mod brauchte, werden neu aufgelöst und können so mitziehen
+  const kept = new Set(pruneOrphans(draft.mods.filter(m => m !== current)));
+  const existing = draft.mods.filter(m => kept.has(m));
 
-  const warnings = [];
-  const entry = {
-    ...buildModEntry(project, version, current.autoDependency),
-    side: current.side
+  let result = await resolveForDraft(draft, current.projectId || slug, existing, versionId);
+  if (!result.ok && versionId && fallback) {
+    result = await resolveForDraft(draft, current.projectId || slug, existing, null);
+  }
+  if (!result.ok) {
+    if (fallback) {
+      return { draft, updated: false, warnings: [`${current.name}: Es gibt keine neuere Version, die zu den anderen Mods passt (${result.reason}).`] };
+    }
+    throw new Error(result.reason);
+  }
+
+  const warnings = skippedWarnings(result, versionId);
+  if (result.chosen.versionId === current.versionId) return { draft, updated: false, warnings };
+
+  const entries = await buildEntries(result.selected);
+  const rootEntry = {
+    ...entries.find(entry => entry.projectId === current.projectId),
+    side: current.side,
+    autoDependency: current.autoDependency,
+    ...(current.disabled ? { disabled: true } : {})
   };
-  const mods = draft.mods.map(m => (m.slug === slug ? entry : m));
-  entry.dependencies = await addDependencies(version, entry.name, entry.side, mods, draft, warnings);
-  return { draft: { ...draft, mods: pruneOrphans(mods) }, updated: true, warnings };
+  const added = entries.filter(entry => entry.projectId !== current.projectId);
+  const mods = draft.mods.flatMap(m => (m === current ? [rootEntry] : kept.has(m) ? [m] : []));
+  mods.push(...added);
+  return { draft: { ...draft, mods: raiseClientDependencySides(mods, [rootEntry, ...added]) }, updated: true, warnings };
 }
 
 export function setModSide(draft, slug, side) {

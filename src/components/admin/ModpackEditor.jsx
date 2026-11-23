@@ -202,7 +202,7 @@ export default function ModpackEditor({ draft, published, warnings, onDraftChang
   });
 
   const handleUpdate = (mod) => runChange(`update:${mod.slug}`, async () => {
-    const result = await updateModInDraft(draft, mod.slug, { versionId: availableUpdates[`mods:${mod.slug}`]?.versionId });
+    const result = await updateModInDraft(draft, mod.slug, { versionId: availableUpdates[`mods:${mod.slug}`]?.versionId, fallback: true });
     if (!result.updated) {
       return { draft, warnings: [`${mod.name} ist bereits auf der neuesten passenden Version.`] };
     }

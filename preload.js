@@ -130,6 +130,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Eigene Mods der Spieler, passend zur Modliste des Servers
   getUserMods: () => ipcRenderer.invoke('user-mods-list'),
   installUserMod: (options) => ipcRenderer.invoke('user-mods-install', options),
+  resolveDraftMod: (options) => ipcRenderer.invoke('modpack-resolve-mod', options),
   removeUserMod: (projectId) => ipcRenderer.invoke('user-mods-remove', projectId),
 
   // Modpack-Workflow (Entwurf, Server, Veröffentlichung)

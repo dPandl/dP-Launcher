@@ -83,7 +83,7 @@ import {
   isValidManifest,
   planServerSync
 } from './modpackUtils.js';
-import { createModrinthIo, resolveModInstall, inspectJar } from './modResolver.js';
+import { createModrinthIo, resolveModInstall, inspectJar, findInstalledConflicts, repairModConflicts } from './modResolver.js';
 import { applyClientDefaults } from './clientDefaults.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -4959,8 +4959,10 @@ const modrinthIo = createModrinthIo({
   writeInspectCache: (cache) => writeJsonFile(modInspectCachePath, cache),
   findLocalFile: (mod) => {
     if (!isSafeModFilename(mod.filename)) return null;
-    const localPath = path.join(getEditInstanceDir(), 'mods', mod.filename);
-    return fs.existsSync(localPath) ? fs.readFileSync(localPath) : null;
+    // Eigene Mods des Modpacks liegen im Ordner custom-mods, bis sie veröffentlicht sind
+    const candidates = [path.join(getEditInstanceDir(), 'mods', mod.filename), path.join(customModsDir(), mod.filename)];
+    const localPath = candidates.find(candidate => fs.existsSync(candidate));
+    return localPath ? fs.readFileSync(localPath) : null;
   }
 });
 
@@ -5073,6 +5075,31 @@ ipcMain.handle('user-mods-install', async (event, { projectId, versionId, packMo
   } catch (err) {
     console.error('Mod-Installation fehlgeschlagen:', err);
     return { success: false, error: err.message, skipped: [], warnings: [] };
+  }
+});
+
+// Modpack-Editor: sucht zu einer Mod die neueste Version, die zu den Mods im Entwurf passt, samt Abhängigkeiten
+ipcMain.handle('modpack-resolve-mod', async (event, { projectRef, versionId, existing, gameVersion, loader }) => {
+  try {
+    const fixedMods = Array.isArray(existing) ? existing.filter(mod => !mod.disabled) : [];
+    const fixedVersionIds = new Set(fixedMods.map(mod => mod.versionId));
+    // Eine Mod im Entwurf, deren Datei sich nicht lesen lässt, soll das Hinzufügen nicht verhindern
+    const io = {
+      ...modrinthIo,
+      inspect: async (mod) => {
+        try {
+          return await modrinthIo.inspect(mod);
+        } catch (err) {
+          if (fixedVersionIds.has(mod.versionId)) return [];
+          throw err;
+        }
+      }
+    };
+    const result = await resolveModInstall({ projectRef, versionId, existing: fixedMods, gameVersion, loader }, io);
+    return { success: true, result };
+  } catch (err) {
+    console.error('Mod-Auflösung fehlgeschlagen:', err);
+    return { success: false, error: err.message };
   }
 });
 
@@ -5552,6 +5579,17 @@ async function syncModsToDir(manifest, modsDir, keepFiles = new Set()) {
     const autoInstalled = await verifyAndAutoRepairLocalDependencies(manifest, modsDir);
     if (autoInstalled && autoInstalled.length > 0) {
       console.log(`[PreLaunchCheck] ${autoInstalled.length} fehlende Abhängigkeit(en) automatisch nachgeladen:`, autoInstalled);
+    }
+
+    // Fabric bricht beim Start ab, wenn sich Mods per `breaks` ausschließen oder Versionen nicht passen.
+    // Das fangen wir hier mit einer verständlichen Meldung ab, statt den Fabric-Dialog zu zeigen.
+    const conflicts = findInstalledConflicts(
+      fs.readdirSync(modsDir)
+        .filter(f => f.endsWith('.jar'))
+        .map(f => ({ file: f, mods: getJarModsCached(path.join(modsDir, f)) }))
+    );
+    if (conflicts.length > 0) {
+      throw new Error(`Die Mods passen nicht zusammen:\n- ${conflicts.join('\n- ')}\nBitte die Versionen im Modpack anpassen.`);
     }
 
     // Pack-Sync: Ressourcenpakete & Shader abgleichen
@@ -6370,6 +6408,25 @@ handleAdmin('modpack-launch-test', async () => {
   const draft = readJsonFile(modpackDraftPath());
   if (!draft?.mods?.length) {
     return { success: false, error: 'Der Entwurf enthält keine Mods.' };
+  }
+
+  // Passen Mods im Entwurf nicht zusammen, setzen wir sie auf Versionen, die zusammen funktionieren
+  try {
+    setGameStatus('preparing', 'Mod-Kompatibilität wird geprüft...', 2);
+    const repair = await repairModConflicts(
+      { mods: draft.mods, gameVersion: draft.gameVersion, loader: draft.loader },
+      modrinthIo,
+      { onProgress: (done, total) => setGameStatus('preparing', `Mod-Kompatibilität wird geprüft (${done}/${total})...`, 2) }
+    );
+    if (repair.changes.length > 0) {
+      draft.mods = repair.mods;
+      writeJsonFile(modpackDraftPath(), draft);
+      if (mainWindow) mainWindow.webContents.send('modpack-draft-updated', draft);
+      console.log('[Kompatibilität] Entwurf angepasst:\n- ' + repair.changes.join('\n- '));
+    }
+  } catch (err) {
+    // Ein Netzwerkfehler soll den Test nicht verhindern, der Pre-Launch-Check meldet echte Konflikte weiterhin
+    console.warn('Kompatibilitätsprüfung des Entwurfs fehlgeschlagen:', err.message);
   }
 
   setGameStatus('preparing', 'Mods der Testinstanz werden abgeglichen...', 5);

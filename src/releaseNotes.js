@@ -1,5 +1,20 @@
 export const releaseNotes = [
   {
+    version: '0.1.18',
+    date: '23.11.2026',
+    title: 'Mods passen zusammen: Konflikte werden automatisch gelöst',
+    whatsNew: [
+      'Im Modpack-Editor wählt der Launcher beim Hinzufügen und Aktualisieren einer Mod selbst die neueste Version, die zu den anderen Mods im Entwurf passt. Er liest dafür die Mod-Dateien und prüft Ausschlüsse („breaks“) und Versionsangaben der Abhängigkeiten. Passt die neueste Version nicht, nimmt er die nächstältere und erklärt, warum',
+      '„Lokal testen“ repariert Konflikte im Entwurf vor dem Start selbst und speichert die passenden Versionen im Entwurf. Beispiel: Sodium 0.9.3 ist nicht mit Iris 1.11.7 und Fusion 1.3.16 kompatibel, der Launcher setzt Sodium auf 0.9.2'
+    ],
+    bugFixes: [
+      'Der Start zeigt bei Mods, die sich ausschließen oder deren Versionen nicht passen, eine verständliche Meldung statt des Fabric-Fehlerdialogs'
+    ],
+    adjustments: [
+      'Beim Aktualisieren im Editor bleibt eine deaktivierte Mod deaktiviert, und Abhängigkeiten, die nur diese Mod brauchte, werden mitaktualisiert'
+    ]
+  },
+  {
     version: '0.1.17',
     date: '15.11.2026',
     title: 'Anleitungen kommen wieder bei allen Spielern an',

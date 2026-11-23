@@ -231,6 +231,158 @@ function findBreakConflict(entry, env) {
   return null;
 }
 
+// Eine neue Version darf nicht gegen die Versionsangaben der schon gewählten Mods verstoßen
+function findDependentConflict(entry, env) {
+  for (const other of env) {
+    for (const mod of other.bundle) {
+      for (const [id, predicate] of Object.entries(mod.depends)) {
+        if (IGNORED_DEPENDENCY_IDS.has(id)) continue;
+        const candidates = entry.bundle.filter(target => target.id === id || target.provides.includes(id));
+        if (candidates.length === 0) continue;
+        const providers = providersOf(id, [...env, entry]);
+        if (providers.some(provider => versionSatisfies(provider.version, predicate) !== false)) continue;
+        return `${other.name} braucht ${candidates[0].name} ${formatPredicate(predicate)}, diese Version ist ${candidates[0].version}`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Prüft fertig installierte Mod-Dateien auf dieselben Konflikte, die Fabric beim Start meldet:
+ * `breaks` mit passender Version und `depends` mit nicht erfüllter Version.
+ * @param {{ file: string, mods: Object[] }[]} entries - je Datei die Mod samt eingebetteten Mods (inspectJar)
+ * @returns {{ owner: string, target: string, message: string }[]} owner ist die Datei mit der Angabe, target die betroffene
+ */
+export function findConflictPairs(entries) {
+  const pairs = [];
+  const seen = new Set();
+  const report = (owner, target, message) => {
+    if (seen.has(message)) return;
+    seen.add(message);
+    pairs.push({ owner, target, message });
+  };
+
+  const providersOfId = (id) => entries.flatMap(entry => entry.mods
+    .filter(mod => mod.id === id || mod.provides.includes(id))
+    .map(mod => ({ mod, file: entry.file })));
+
+  for (const entry of entries) {
+    for (const mod of entry.mods) {
+      for (const [id, predicate] of Object.entries(mod.breaks)) {
+        if (IGNORED_DEPENDENCY_IDS.has(id)) continue;
+        for (const target of providersOfId(id)) {
+          if (target.file === entry.file) continue;
+          if (versionSatisfies(target.mod.version, predicate) === true) {
+            report(entry.file, target.file, `${mod.name} ${mod.version} verträgt sich nicht mit ${target.mod.name} ${target.mod.version} (${entry.file} und ${target.file})`);
+          }
+        }
+      }
+
+      for (const [id, predicate] of Object.entries(mod.depends)) {
+        if (IGNORED_DEPENDENCY_IDS.has(id)) continue;
+        const providers = providersOfId(id);
+        // Fehlende Mods behandelt der Abhängigkeits-Check, hier geht es nur um falsche Versionen
+        if (providers.length === 0) continue;
+        const results = providers.map(provider => versionSatisfies(provider.mod.version, predicate));
+        if (results.every(result => result === false)) {
+          const provider = providers[0];
+          report(entry.file, provider.file, `${mod.name} ${mod.version} braucht ${provider.mod.name} ${formatPredicate(predicate)}, installiert ist ${provider.mod.version}`);
+        }
+      }
+    }
+  }
+  return pairs;
+}
+
+export function findInstalledConflicts(entries) {
+  return findConflictPairs(entries).map(pair => pair.message);
+}
+
+function deriveSide(clientSide, serverSide) {
+  if (clientSide === 'unsupported') return 'server';
+  if (serverSide === 'unsupported') return 'client';
+  return 'both';
+}
+
+/**
+ * Löst Konflikte in einer Modliste, indem betroffene Mods auf eine Version gesetzt werden,
+ * die zu allen anderen passt (erst die Mod mit der `breaks`/`depends`-Angabe, dann die betroffene).
+ * @returns {{ mods: Object[], changes: string[], unresolved: string[] }}
+ */
+export async function repairModConflicts({ mods, gameVersion, loader }, io, { onProgress } = {}) {
+  let current = [...mods];
+  const changes = [];
+  const tried = new Set();
+  const MAX_ROUNDS = 12;
+  const INSPECT_BATCH = 8;
+  let pairs = [];
+
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const active = current.filter(mod => !mod.disabled);
+    const entries = [];
+    for (let i = 0; i < active.length; i += INSPECT_BATCH) {
+      onProgress?.(i, active.length);
+      const batch = active.slice(i, i + INSPECT_BATCH);
+      const bundles = await Promise.all(batch.map(async (mod) => {
+        try { return await io.inspect(mod); } catch { return []; }
+      }));
+      batch.forEach((mod, index) => entries.push({ file: mod.filename, mods: bundles[index] }));
+    }
+
+    pairs = findConflictPairs(entries);
+    if (pairs.length === 0) return { mods: current, changes, unresolved: [] };
+
+    let fixed = false;
+    for (const pair of pairs) {
+      for (const file of [pair.owner, pair.target]) {
+        const candidate = current.find(mod => mod.filename === file);
+        const key = candidate && `${candidate.projectId}:${candidate.versionId}`;
+        if (!candidate || candidate.custom || tried.has(key)) continue;
+        tried.add(key);
+
+        const result = await resolveModInstall({
+          projectRef: candidate.projectId,
+          existing: active.filter(mod => mod !== candidate),
+          gameVersion,
+          loader
+        }, io);
+        if (!result.ok || result.chosen.versionId === candidate.versionId) continue;
+
+        const chosen = result.chosen;
+        const updated = {
+          ...candidate,
+          versionId: chosen.versionId,
+          versionNumber: chosen.versionNumber,
+          filename: chosen.filename,
+          downloadUrl: chosen.downloadUrl,
+          sha1: chosen.sha1,
+          size: chosen.size,
+          dependencies: chosen.dependencies
+        };
+        const added = [];
+        for (const selected of result.selected) {
+          if (selected.projectId === candidate.projectId) continue;
+          const project = await io.getProject(selected.projectId);
+          added.push({
+            ...selected,
+            iconUrl: project?.icon_url || null,
+            side: project ? deriveSide(project.client_side, project.server_side) : 'both',
+            addedAt: Date.now()
+          });
+        }
+        current = [...current.map(mod => (mod === candidate ? updated : mod)), ...added];
+        changes.push(`${candidate.name}: ${candidate.versionNumber} wurde durch ${chosen.versionNumber} ersetzt (${pair.message})`);
+        fixed = true;
+        break;
+      }
+      if (fixed) break;
+    }
+    if (!fixed) return { mods: current, changes, unresolved: pairs.map(pair => pair.message) };
+  }
+  return { mods: current, changes, unresolved: pairs.map(pair => pair.message) };
+}
+
 /**
  * Sucht die neueste Version von projectRef samt Abhängigkeiten, ohne die vorhandenen Mods zu ändern.
  * @param {Object} options
@@ -295,6 +447,9 @@ export async function resolveModInstall({ projectRef, versionId = null, existing
 
     const conflict = findBreakConflict(entry, env);
     if (conflict) return { ok: false, reason: conflict };
+
+    const dependentConflict = findDependentConflict(entry, env);
+    if (dependentConflict) return { ok: false, reason: dependentConflict };
 
     env.push(entry);
 
